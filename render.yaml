@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: qna-analytics-api
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SP_API_REFRESH_TOKEN
+        sync: false
+      - key: SP_API_LWA_APP_ID
+        sync: false
+      - key: SP_API_LWA_CLIENT_SECRET
+        sync: false
+      - key: SP_API_AWS_ACCESS_KEY
+        sync: false
+      - key: SP_API_AWS_SECRET_KEY
+        sync: false
+      - key: SP_API_ROLE_ARN
+        sync: false
+      - key: SP_API_MARKETPLACE_ID
+        value: A21TJRUUN4KGV
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
