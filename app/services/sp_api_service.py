@@ -1,4 +1,9 @@
-"""Amazon SP-API integration service."""
+"""Amazon SP-API integration service.
+
+Uses the Orders API (requires 'Inventory and Order Tracking' role) as the
+primary data source.  GST MTR reports are kept as a fallback for when the
+'Restricted Tax' role is available.
+"""
 
 import io
 import csv
@@ -16,15 +21,18 @@ logger = logging.getLogger(__name__)
 
 # SP-API endpoints
 LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token"
-SP_API_BASE_URL = "https://sellingpartnerapi-fe.amazon.com"  # Far East (India)
+SP_API_BASE_URL = "https://sellingpartnerapi-eu.amazon.com"  # EU region (includes India)
 
-# Report types for Indian marketplace MTR
+# Report types (kept as fallback – need Restricted Tax role)
 REPORT_TYPE_B2C = "GET_GST_MTR_B2C_CUSTOM"
 REPORT_TYPE_B2B = "GET_GST_MTR_B2B_CUSTOM"
 
 # Polling config
 REPORT_POLL_INTERVAL = 30  # seconds
 REPORT_MAX_WAIT = 600  # 10 minutes max
+
+# Orders API pagination
+ORDERS_MAX_RESULTS_PER_PAGE = 100
 
 
 class SPAPIAuthError(Exception):
@@ -51,14 +59,11 @@ class SPAPIService:
         return self.settings.sp_api_configured
 
     def _get_credentials(self) -> dict:
-        """Get SP-API credentials dict."""
+        """Get SP-API credentials dict (LWA only, AWS no longer needed)."""
         return {
             "refresh_token": self.settings.sp_api_refresh_token,
             "lwa_app_id": self.settings.sp_api_lwa_app_id,
             "lwa_client_secret": self.settings.sp_api_lwa_client_secret,
-            "aws_access_key": self.settings.sp_api_aws_access_key,
-            "aws_secret_key": self.settings.sp_api_aws_secret_key,
-            "role_arn": self.settings.sp_api_role_arn,
         }
 
     def _get_access_token(self) -> str:
@@ -119,8 +124,138 @@ class SPAPIService:
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            logger.error("SP-API request failed: %s %s -> %s", method, path, e)
+            logger.error(
+                "SP-API request failed: %s %s -> %s | Body: %s",
+                method, path, e, e.response.text[:500],
+            )
             raise SPAPIReportError(f"SP-API request failed: {e}")
+
+    # ------------------------------------------------------------------ #
+    #  Orders API  (primary – works with 'Inventory and Order Tracking')
+    # ------------------------------------------------------------------ #
+
+    def fetch_orders(
+        self,
+        start_date: str,
+        end_date: str,
+        max_pages: int = 50,
+    ) -> list[dict]:
+        """Fetch orders from the Orders API.
+
+        Args:
+            start_date: YYYY-MM-DD
+            end_date:   YYYY-MM-DD
+            max_pages:  Safety limit on pagination depth
+
+        Returns:
+            List of order dicts with order-level info.
+        """
+        if not self.is_configured:
+            raise SPAPIAuthError(
+                "SP-API credentials not configured. "
+                "Please set SP_API_REFRESH_TOKEN, SP_API_LWA_APP_ID, "
+                "and SP_API_LWA_CLIENT_SECRET in .env"
+            )
+
+        marketplace = self.settings.sp_api_marketplace_id
+        all_orders: list[dict] = []
+
+        params = {
+            "MarketplaceIds": marketplace,
+            "CreatedAfter": f"{start_date}T00:00:00Z",
+            "CreatedBefore": f"{end_date}T23:59:59Z",
+            "MaxResultsPerPage": str(ORDERS_MAX_RESULTS_PER_PAGE),
+            "OrderStatuses": "Shipped,Unshipped,PartiallyShipped",
+        }
+
+        pages_fetched = 0
+        next_token: Optional[str] = None
+
+        while pages_fetched < max_pages:
+            if next_token:
+                # Subsequent pages use NextToken only
+                result = self._make_request(
+                    "GET",
+                    "/orders/v0/orders",
+                    params={"MarketplaceIds": marketplace, "NextToken": next_token},
+                )
+            else:
+                result = self._make_request("GET", "/orders/v0/orders", params=params)
+
+            payload = result.get("payload", {})
+            orders = payload.get("Orders", [])
+            all_orders.extend(orders)
+            pages_fetched += 1
+
+            logger.info(
+                "Fetched page %d: %d orders (total so far: %d)",
+                pages_fetched, len(orders), len(all_orders),
+            )
+
+            next_token = payload.get("NextToken")
+            if not next_token or len(orders) == 0:
+                break
+
+            # Small delay to avoid rate limiting
+            time.sleep(0.5)
+
+        logger.info("Fetched %d total orders across %d pages", len(all_orders), pages_fetched)
+        return all_orders
+
+    def fetch_order_items(self, order_id: str) -> list[dict]:
+        """Fetch line items for a specific order."""
+        result = self._make_request(
+            "GET", f"/orders/v0/orders/{order_id}/orderItems"
+        )
+        payload = result.get("payload", {})
+        items = payload.get("OrderItems", [])
+        return items
+
+    def fetch_orders_with_items(
+        self,
+        start_date: str,
+        end_date: str,
+        max_pages: int = 50,
+    ) -> list[dict]:
+        """Fetch orders and enrich each with its line items.
+
+        Returns a flat list of dicts – one per order-item combination –
+        ready for transformation by the data processor.
+        """
+        orders = self.fetch_orders(start_date, end_date, max_pages=max_pages)
+        flat_records: list[dict] = []
+
+        for idx, order in enumerate(orders):
+            order_id = order.get("AmazonOrderId", "")
+            try:
+                items = self.fetch_order_items(order_id)
+            except Exception as e:
+                logger.warning("Failed to get items for order %s: %s", order_id, e)
+                # Still include order-level data even without items
+                flat_records.append(order)
+                continue
+
+            for item in items:
+                # Merge order-level + item-level data
+                merged = {**order, **item}
+                flat_records.append(merged)
+
+            # Rate-limit protection
+            if (idx + 1) % 20 == 0:
+                logger.info("Processed %d / %d orders for items...", idx + 1, len(orders))
+                time.sleep(1)
+            else:
+                time.sleep(0.2)
+
+        logger.info(
+            "Fetched %d order-item records from %d orders",
+            len(flat_records), len(orders),
+        )
+        return flat_records
+
+    # ------------------------------------------------------------------ #
+    #  Reports API  (fallback – needs Restricted Tax role for GST MTR)
+    # ------------------------------------------------------------------ #
 
     def create_report(
         self,
@@ -171,7 +306,6 @@ class SPAPIService:
 
     def download_report(self, report_document_id: str) -> list[dict]:
         """Download and parse a report document. Returns list of row dicts."""
-        # Get the download URL
         doc_info = self._make_request(
             "GET",
             f"/reports/2021-06-30/documents/{report_document_id}",
@@ -182,20 +316,16 @@ class SPAPIService:
 
         logger.info("Downloading report document from %s...", download_url[:80])
 
-        # Download the report
         response = httpx.get(download_url, timeout=120.0)
         response.raise_for_status()
 
-        # Decompress if needed
         content = response.content
         if compression == "GZIP":
             content = gzip.decompress(content)
 
-        # Parse TSV/CSV content
         text = content.decode("utf-8")
         rows = []
 
-        # SP-API reports are typically tab-separated
         reader = csv.DictReader(io.StringIO(text), delimiter="\t")
         for row in reader:
             rows.append(dict(row))
@@ -221,44 +351,3 @@ class SPAPIService:
         doc_id = self.wait_for_report(report_id)
         data = self.download_report(doc_id)
         return data
-
-    def fetch_b2c_data(self, start_date: str, end_date: str) -> list[dict]:
-        """Fetch B2C MTR report data."""
-        return self.fetch_report_data(REPORT_TYPE_B2C, start_date, end_date)
-
-    def fetch_b2b_data(self, start_date: str, end_date: str) -> list[dict]:
-        """Fetch B2B MTR report data."""
-        return self.fetch_report_data(REPORT_TYPE_B2B, start_date, end_date)
-
-    def fetch_all_data(
-        self,
-        start_date: str,
-        end_date: str,
-        report_types: list[str] = None,
-    ) -> dict:
-        """Fetch data for specified report types.
-        
-        Returns: {"b2c": [...], "b2b": [...]}
-        """
-        if report_types is None:
-            report_types = ["B2C", "B2B"]
-
-        results = {}
-
-        if "B2C" in report_types:
-            try:
-                results["b2c"] = self.fetch_b2c_data(start_date, end_date)
-                logger.info("Fetched %d B2C records", len(results["b2c"]))
-            except Exception as e:
-                logger.error("Failed to fetch B2C data: %s", e)
-                results["b2c_error"] = str(e)
-
-        if "B2B" in report_types:
-            try:
-                results["b2b"] = self.fetch_b2b_data(start_date, end_date)
-                logger.info("Fetched %d B2B records", len(results["b2b"]))
-            except Exception as e:
-                logger.error("Failed to fetch B2B data: %s", e)
-                results["b2b_error"] = str(e)
-
-        return results

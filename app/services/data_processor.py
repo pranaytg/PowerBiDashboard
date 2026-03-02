@@ -299,9 +299,15 @@ def transform_sp_api_mtr_row(row: dict, business_type: str, product_catalog: dic
 
 
 def transform_sp_api_orders_row(row: dict, product_catalog: dict) -> dict:
-    """Transform an SP-API Orders API row to our schema.
-    
-    Alternative to MTR reports - uses the Orders API directly.
+    """Transform a merged SP-API Order+OrderItem row to our schema.
+
+    The ``row`` dict comes from ``SPAPIService.fetch_orders_with_items()``
+    which merges order-level fields (PurchaseDate, FulfillmentChannel, …)
+    with item-level fields (ASIN, SellerSKU, QuantityOrdered, ItemPrice, …).
+
+    FBA detection:
+        FulfillmentChannel == 'AFN'  → Amazon Fulfillment (FBA)
+        FulfillmentChannel == 'MFN'  → Merchant Fulfilled Network (self-ship)
     """
     purchase_date = row.get("PurchaseDate", "")
     date_fields = derive_date_fields(purchase_date)
@@ -313,8 +319,40 @@ def transform_sp_api_orders_row(row: dict, product_catalog: dict) -> dict:
     is_business = row.get("IsBusinessOrder", False)
     business_type = "b2b" if is_business else "b2c"
 
+    # FBA detection via FulfillmentChannel
+    fulfillment_channel = row.get("FulfillmentChannel", "MFN")  # AFN = FBA, MFN = self
+    is_fba = fulfillment_channel == "AFN"
+
     # Shipping address
     shipping = row.get("ShippingAddress", {}) or {}
+
+    # Item-level quantity (prefer item-level over order-level)
+    quantity = safe_int(
+        row.get("QuantityOrdered")
+        or row.get("QuantityShipped")
+        or row.get("NumberOfItemsShipped")
+        or 0
+    )
+
+    # Item price – OrderItems include an ItemPrice object
+    item_price = row.get("ItemPrice", {}) or {}
+    item_amount = safe_float(item_price.get("Amount")) if isinstance(item_price, dict) else None
+    # Fallback to order total
+    if item_amount is None:
+        order_total = row.get("OrderTotal", {}) or {}
+        item_amount = safe_float(order_total.get("Amount")) if isinstance(order_total, dict) else None
+
+    # SKU
+    sku = safe_lowercase(
+        row.get("SellerSKU", "")
+        or product_info.get("sku", "")
+    )
+
+    # Item description from item or catalog
+    title = row.get("Title", "") or product_info.get("item_description", "")
+
+    # Warehouse / fulfillment center
+    warehouse = row.get("FulfillmentCenterId", "") or ""
 
     record = {
         "Date": date_fields["Date"],
@@ -329,24 +367,26 @@ def transform_sp_api_orders_row(row: dict, product_catalog: dict) -> dict:
         "Invoice Date": safe_lowercase(purchase_date),
         "Transaction Type": safe_lowercase(row.get("OrderStatus", "shipment")),
         "Order Id": safe_lowercase(row.get("AmazonOrderId", "")),
-        "Quantity": safe_int(row.get("NumberOfItemsShipped", 0)),
+        "Quantity": quantity,
         "BRAND": product_info.get("brand"),
-        "Item Description": product_info.get("item_description"),
+        "Item Description": safe_lowercase(title),
         "Asin": asin,
-        "Sku": safe_lowercase(row.get("SellerSKU", "")) or product_info.get("sku"),
+        "Sku": sku,
         "Category": product_info.get("category"),
         "Segment": product_info.get("segment"),
         "Ship To City": safe_lowercase(shipping.get("City", "")),
         "Ship To State": safe_lowercase(shipping.get("StateOrRegion", "")),
         "Ship To Country": safe_lowercase(shipping.get("CountryCode", "in")),
         "Ship To Postal Code": safe_lowercase(shipping.get("PostalCode", "")),
-        "Invoice Amount": safe_float(row.get("OrderTotal", {}).get("Amount")),
-        "Principal Amount": safe_float(row.get("OrderTotal", {}).get("Amount")),
-        "Warehouse Id": None,
+        "Invoice Amount": item_amount,
+        "Principal Amount": item_amount,
+        "Warehouse Id": safe_lowercase(warehouse) or ("fba" if is_fba else None),
         "Customer Bill To Gstid": None,
-        "Buyer Name": safe_lowercase(row.get("BuyerInfo", {}).get("BuyerName", "")),
+        "Buyer Name": None,
         "Source": date_fields["Source"],
         "Channel": "amazon",
+        "Fulfillment_Type": "fba" if is_fba else "merchant",
     }
 
     return record
+

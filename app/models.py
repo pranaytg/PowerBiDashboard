@@ -75,8 +75,8 @@ class RefreshRequest(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     report_types: list[str] = Field(
-        default=["B2C", "B2B"],
-        description="Report types to fetch: B2C, B2B, or both",
+        default=["ORDERS"],
+        description="Data source: ORDERS (Orders API, default), B2C, B2B (GST MTR reports)",
     )
 
 

@@ -10,7 +10,7 @@ from app.database import get_supabase_client
 from app.models import RefreshRequest, RefreshStatusResponse, RefreshHistoryResponse
 from app.services.supabase_service import SupabaseService
 from app.services.sp_api_service import SPAPIService, SPAPIAuthError, SPAPIReportError
-from app.services.data_processor import transform_sp_api_mtr_row
+from app.services.data_processor import transform_sp_api_mtr_row, transform_sp_api_orders_row
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/refresh", tags=["Data Refresh"])
@@ -32,7 +32,12 @@ def _run_refresh(
     end_date: str,
     report_types: list[str],
 ):
-    """Background task to fetch SP-API data and store in Supabase."""
+    """Background task to fetch SP-API data and store in Supabase.
+    
+    Primary: Uses Orders API (works with 'Inventory and Order Tracking' role).
+    Fallback: GST MTR reports (only if report_types contains 'B2C'/'B2B' AND
+              the Restricted Tax role is available).
+    """
     total_fetched = 0
     total_inserted = 0
     errors = []
@@ -44,31 +49,51 @@ def _run_refresh(
             "Loaded product catalog with %d entries", len(product_catalog)
         )
 
-        # Fetch data from SP-API
-        raw_data = sp_api.fetch_all_data(start_date, end_date, report_types)
-
         all_records = []
+        use_orders_api = "ORDERS" in report_types or not any(
+            t in report_types for t in ("B2C", "B2B")
+        )
 
-        # Process B2C data
-        if "b2c" in raw_data:
-            for row in raw_data["b2c"]:
-                record = transform_sp_api_mtr_row(row, "b2c", product_catalog)
-                all_records.append(record)
-            total_fetched += len(raw_data["b2c"])
-        if "b2c_error" in raw_data:
-            errors.append(f"B2C: {raw_data['b2c_error']}")
+        if use_orders_api:
+            # ---- Primary path: Orders API ----
+            logger.info("Using Orders API to fetch data for %s to %s", start_date, end_date)
+            try:
+                raw_data = sp_api.fetch_orders_with_items(start_date, end_date)
+                total_fetched = len(raw_data)
+                for row in raw_data:
+                    record = transform_sp_api_orders_row(row, product_catalog)
+                    all_records.append(record)
+                logger.info("Transformed %d records from Orders API", len(all_records))
+            except Exception as e:
+                logger.error("Orders API failed: %s", e)
+                errors.append(f"Orders API: {e}")
+        else:
+            # ---- Fallback path: GST MTR Reports ----
+            logger.info("Using GST MTR Reports (requires Restricted Tax role)")
+            raw_data = sp_api.fetch_all_data(start_date, end_date, report_types)
 
-        # Process B2B data
-        if "b2b" in raw_data:
-            for row in raw_data["b2b"]:
-                record = transform_sp_api_mtr_row(row, "b2b", product_catalog)
-                all_records.append(record)
-            total_fetched += len(raw_data["b2b"])
-        if "b2b_error" in raw_data:
-            errors.append(f"B2B: {raw_data['b2b_error']}")
+            if "b2c" in raw_data:
+                for row in raw_data["b2c"]:
+                    record = transform_sp_api_mtr_row(row, "b2c", product_catalog)
+                    all_records.append(record)
+                total_fetched += len(raw_data["b2c"])
+            if "b2c_error" in raw_data:
+                errors.append(f"B2C: {raw_data['b2c_error']}")
+
+            if "b2b" in raw_data:
+                for row in raw_data["b2b"]:
+                    record = transform_sp_api_mtr_row(row, "b2b", product_catalog)
+                    all_records.append(record)
+                total_fetched += len(raw_data["b2b"])
+            if "b2b_error" in raw_data:
+                errors.append(f"B2B: {raw_data['b2b_error']}")
 
         # Insert into Supabase
         if all_records:
+            # Strip extra fields that don't exist in the DB schema
+            for rec in all_records:
+                rec.pop("Fulfillment_Type", None)
+
             inserted, updated = service.upsert_sales_batch(all_records)
             total_inserted = inserted
             logger.info(
