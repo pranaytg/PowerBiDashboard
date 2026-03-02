@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     log_level: str = "info"
+    allowed_origins: str = "*"  # Comma-separated list; restrict in production
+    self_base_url: str = "http://localhost:8000"  # Set to Render URL in production
+    refresh_hour_ist: int = 19  # Hour in IST (24h) for daily auto-refresh (default: 7 PM)
 
     @property
     def sp_api_configured(self) -> bool:

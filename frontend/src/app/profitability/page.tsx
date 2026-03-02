@@ -63,7 +63,9 @@ export default function ProfitabilityPage() {
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const params = new URLSearchParams({ page: String(page), per_page: "50" });
+            // For SKU view, we need ALL data for accurate aggregation. For Order view, 50 is fine.
+            const limit = viewMode === "sku" ? "50000" : "50";
+            const params = new URLSearchParams({ page: String(page), per_page: limit });
             if (filterSku) params.set("sku", filterSku);
             if (filterOrder) params.set("order_id", filterOrder);
 
@@ -76,7 +78,7 @@ export default function ProfitabilityPage() {
             console.error("Load error:", e);
         }
         setLoading(false);
-    }, [page, filterSku, filterOrder]);
+    }, [page, filterSku, filterOrder, viewMode]);
 
     useEffect(() => { loadData(); }, [loadData]);
 

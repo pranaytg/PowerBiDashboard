@@ -1,160 +1,143 @@
--- ============================================
--- COGS & Profitability Tables - Supabase Migration
--- Run this in Supabase Dashboard > SQL Editor
--- ============================================
-
--- 1) COGS table - Cost of Goods Sold per SKU
-CREATE TABLE IF NOT EXISTS cogs (
+-- 1. Table for global COGS settings per SKU
+CREATE TABLE IF NOT EXISTS public.cogs (
     id BIGSERIAL PRIMARY KEY,
     sku TEXT UNIQUE NOT NULL,
     product_name TEXT,
-
-    -- Import pricing
+    
+    -- Inputs
     import_price NUMERIC DEFAULT 0,
-    currency TEXT DEFAULT 'USD' CHECK (currency IN ('USD', 'EUR', 'INR')),
+    currency TEXT DEFAULT 'USD',
     exchange_rate NUMERIC DEFAULT 1,
-    import_price_inr NUMERIC GENERATED ALWAYS AS (import_price * exchange_rate) STORED,
-
-    -- Custom duty
     custom_duty_pct NUMERIC DEFAULT 0,
-    custom_duty_amt NUMERIC GENERATED ALWAYS AS (import_price * exchange_rate * custom_duty_pct / 100) STORED,
-
-    -- GST on import
-    gst1_pct NUMERIC DEFAULT 0,
-    gst1_amt NUMERIC GENERATED ALWAYS AS (
-        (import_price * exchange_rate + import_price * exchange_rate * custom_duty_pct / 100) * gst1_pct / 100
-    ) STORED,
-
-    -- Shipping cost per unit
+    gst1_pct NUMERIC DEFAULT 18,
     shipping_cost NUMERIC DEFAULT 0,
-
-    -- Landed cost = import_price_inr + custom_duty + gst1 + shipping
-    landed_cost NUMERIC GENERATED ALWAYS AS (
-        import_price * exchange_rate
-        + import_price * exchange_rate * custom_duty_pct / 100
-        + (import_price * exchange_rate + import_price * exchange_rate * custom_duty_pct / 100) * gst1_pct / 100
-        + shipping_cost
-    ) STORED,
-
-    -- JH Margin
     margin1_pct NUMERIC DEFAULT 0,
-    margin1_amt NUMERIC GENERATED ALWAYS AS (
-        (
-            import_price * exchange_rate
-            + import_price * exchange_rate * custom_duty_pct / 100
-            + (import_price * exchange_rate + import_price * exchange_rate * custom_duty_pct / 100) * gst1_pct / 100
-            + shipping_cost
-        ) * margin1_pct / 100
-    ) STORED,
-
-    -- Halte cost price = landed_cost + margin1
-    halte_cost_price NUMERIC GENERATED ALWAYS AS (
-        (
-            import_price * exchange_rate
-            + import_price * exchange_rate * custom_duty_pct / 100
-            + (import_price * exchange_rate + import_price * exchange_rate * custom_duty_pct / 100) * gst1_pct / 100
-            + shipping_cost
-        ) * (1 + margin1_pct / 100)
-    ) STORED,
-
-    -- Marketing & Halte margin
     marketing_cost NUMERIC DEFAULT 0,
     margin2_pct NUMERIC DEFAULT 0,
+    gst2_pct NUMERIC DEFAULT 18,
+    
+    -- Auto-computed fields (Generated stored columns in Postgres)
+    import_price_inr NUMERIC GENERATED ALWAYS AS (import_price * exchange_rate) STORED,
+    custom_duty_amt NUMERIC GENERATED ALWAYS AS ((import_price * exchange_rate) * (custom_duty_pct / 100)) STORED,
+    gst1_amt NUMERIC GENERATED ALWAYS AS (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) STORED,
+    landed_cost NUMERIC GENERATED ALWAYS AS ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) STORED,
+    
+    margin1_amt NUMERIC GENERATED ALWAYS AS (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100)) STORED,
+    halte_cost_price NUMERIC GENERATED ALWAYS AS (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))) STORED,
+    
     margin2_amt NUMERIC GENERATED ALWAYS AS (
         (
-            (
-                import_price * exchange_rate
-                + import_price * exchange_rate * custom_duty_pct / 100
-                + (import_price * exchange_rate + import_price * exchange_rate * custom_duty_pct / 100) * gst1_pct / 100
-                + shipping_cost
-            ) * (1 + margin1_pct / 100)
-        ) * margin2_pct / 100
+            ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+        ) * (margin2_pct / 100)
     ) STORED,
-
-    -- Selling price = halte_cost_price + marketing + margin2
+    
     selling_price NUMERIC GENERATED ALWAYS AS (
         (
+            ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+        ) + marketing_cost + 
+        (
             (
-                import_price * exchange_rate
-                + import_price * exchange_rate * custom_duty_pct / 100
-                + (import_price * exchange_rate + import_price * exchange_rate * custom_duty_pct / 100) * gst1_pct / 100
-                + shipping_cost
-            ) * (1 + margin1_pct / 100)
-        ) * (1 + margin2_pct / 100)
-        + marketing_cost
+                ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+            ) * (margin2_pct / 100)
+        )
     ) STORED,
-
-    -- GST on selling
-    gst2_pct NUMERIC DEFAULT 0,
+    
     gst2_amt NUMERIC GENERATED ALWAYS AS (
         (
             (
+                ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+            ) + marketing_cost + 
+            (
                 (
-                    import_price * exchange_rate
-                    + import_price * exchange_rate * custom_duty_pct / 100
-                    + (import_price * exchange_rate + import_price * exchange_rate * custom_duty_pct / 100) * gst1_pct / 100
-                    + shipping_cost
-                ) * (1 + margin1_pct / 100)
-            ) * (1 + margin2_pct / 100)
-            + marketing_cost
-        ) * gst2_pct / 100
+                    ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+                ) * (margin2_pct / 100)
+            )
+        ) * (gst2_pct / 100)
     ) STORED,
-
-    -- MSP = selling_price + gst2
+    
     msp NUMERIC GENERATED ALWAYS AS (
         (
             (
+                ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+            ) + marketing_cost + 
+            (
                 (
-                    import_price * exchange_rate
-                    + import_price * exchange_rate * custom_duty_pct / 100
-                    + (import_price * exchange_rate + import_price * exchange_rate * custom_duty_pct / 100) * gst1_pct / 100
-                    + shipping_cost
-                ) * (1 + margin1_pct / 100)
-            ) * (1 + margin2_pct / 100)
-            + marketing_cost
-        ) * (1 + gst2_pct / 100)
+                    ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+                ) * (margin2_pct / 100)
+            )
+        ) + 
+        (
+            (
+                (
+                    ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+                ) + marketing_cost + 
+                (
+                    (
+                        ((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100)) + (((import_price * exchange_rate) + ((import_price * exchange_rate) * (custom_duty_pct / 100))) * (gst1_pct / 100)) + shipping_cost) * (margin1_pct / 100))
+                    ) * (margin2_pct / 100)
+                )
+            ) * (gst2_pct / 100)
+        )
     ) STORED,
-
+    
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Indexes for COGS
-CREATE INDEX IF NOT EXISTS idx_cogs_sku ON cogs (sku);
-
--- 2) Shipments table - shipping costs per order
-CREATE TABLE IF NOT EXISTS shipments (
+-- 2. Shipments table for per-order shipping costs
+CREATE TABLE IF NOT EXISTS public.shipments (
     id BIGSERIAL PRIMARY KEY,
-    order_id TEXT NOT NULL,
+    order_id TEXT NOT NULL UNIQUE,
     sku TEXT,
     shipping_cost NUMERIC DEFAULT 0,
     carrier TEXT,
     tracking_number TEXT,
-    shipped_date TEXT,
+    shipped_date DATE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_shipments_order_id ON shipments (order_id);
-CREATE INDEX IF NOT EXISTS idx_shipments_sku ON shipments (sku);
+-- 3. Snapshotted COGS table to make order profitability immutable
+CREATE TABLE IF NOT EXISTS public.order_cogs_snapshot (
+    order_id TEXT NOT NULL,
+    sku TEXT NOT NULL,
+    landed_cost NUMERIC NOT NULL,
+    halte_cost_price NUMERIC NOT NULL,
+    shipping_cost NUMERIC DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (order_id, sku)
+);
 
--- 3) Row Level Security
-ALTER TABLE cogs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shipments ENABLE ROW LEVEL SECURITY;
+-- Add update triggers
+CREATE OR REPLACE FUNCTION update_cogs_modified_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
 
-CREATE POLICY "Allow all access to cogs" ON cogs
-    FOR ALL USING (true) WITH CHECK (true);
+DROP TRIGGER IF EXISTS update_cogs_modtime ON public.cogs;
+CREATE TRIGGER update_cogs_modtime BEFORE UPDATE ON public.cogs FOR EACH ROW EXECUTE PROCEDURE update_cogs_modified_column();
 
-CREATE POLICY "Allow all access to shipments" ON shipments
-    FOR ALL USING (true) WITH CHECK (true);
+DROP TRIGGER IF EXISTS update_shipments_modtime ON public.shipments;
+CREATE TRIGGER update_shipments_modtime BEFORE UPDATE ON public.shipments FOR EACH ROW EXECUTE PROCEDURE update_cogs_modified_column();
 
--- 4) Auto-update triggers
-CREATE TRIGGER update_cogs_updated_at
-    BEFORE UPDATE ON cogs
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- Enable Row Level Security (RLS) but allow anonymous access since this is internal dashboard
+ALTER TABLE public.cogs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.shipments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_cogs_snapshot ENABLE ROW LEVEL SECURITY;
 
-CREATE TRIGGER update_shipments_updated_at
-    BEFORE UPDATE ON shipments
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+DROP POLICY IF EXISTS "Allow all access to cogs" ON public.cogs;
+CREATE POLICY "Allow all access to cogs" ON public.cogs FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Allow all access to shipments" ON public.shipments;
+CREATE POLICY "Allow all access to shipments" ON public.shipments FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Allow all access to order snapshots" ON public.order_cogs_snapshot;
+CREATE POLICY "Allow all access to order snapshots" ON public.order_cogs_snapshot FOR ALL USING (true);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_cogs_sku ON public.cogs(sku);
+CREATE INDEX IF NOT EXISTS idx_shipments_order_id ON public.shipments(order_id);
+CREATE INDEX IF NOT EXISTS idx_snapshot_order_id ON public.order_cogs_snapshot(order_id);

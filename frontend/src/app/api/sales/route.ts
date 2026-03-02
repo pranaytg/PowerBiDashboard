@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { query, queryWithCount } from "@/lib/db";
 
-// GET /api/sales — proxy to Supabase sales_data with pagination and filters
+// GET /api/sales — fetch sales_data with pagination and filters
 export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");
@@ -10,29 +10,44 @@ export async function GET(request: NextRequest) {
     const brand = searchParams.get("brand");
     const orderId = searchParams.get("order_id");
 
-    let query = supabase
-        .from("sales_data")
-        .select("*", { count: "exact" })
-        .order("id", { ascending: false });
+    const conditions: string[] = [`"Transaction Type" != 'return'`];
+    const params: unknown[] = [];
+    let paramIdx = 1;
 
-    if (sku) query = query.eq("Sku", sku);
-    if (brand) query = query.eq("BRAND", brand);
-    if (orderId) query = query.eq("Order Id", orderId);
-
-    const offset = (page - 1) * perPage;
-    query = query.range(offset, offset + perPage - 1);
-
-    const { data, error, count } = await query;
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+    if (sku) {
+        conditions.push(`"Sku" ILIKE $${paramIdx++}`);
+        params.push(`%${sku}%`);
+    }
+    if (brand) {
+        conditions.push(`"BRAND" = $${paramIdx++}`);
+        params.push(brand);
+    }
+    if (orderId) {
+        conditions.push(`"Order Id" ILIKE $${paramIdx++}`);
+        params.push(`%${orderId}%`);
     }
 
-    return NextResponse.json({
-        data,
-        total: count || 0,
-        page,
-        per_page: perPage,
-        total_pages: Math.ceil((count || 0) / perPage),
-    });
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const offset = (page - 1) * perPage;
+
+    try {
+        const { rows: data, total: count } = await queryWithCount(
+            `SELECT * FROM sales_data ${where} ORDER BY id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+            `SELECT COUNT(*) as count FROM sales_data ${where}`,
+            [...params, perPage, offset],
+            params
+        );
+
+        return NextResponse.json({
+            data,
+            total: count,
+            page,
+            per_page: perPage,
+            total_pages: Math.ceil(count / perPage),
+        });
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("Sales API Error:", message);
+        return NextResponse.json({ error: message }, { status: 500 });
+    }
 }

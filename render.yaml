@@ -1,13 +1,16 @@
 services:
-  # Python FastAPI backend (existing — SP-API refresh)
+  # Python FastAPI backend (SP-API data refresh + analytics API)
   - type: web
     name: qna-analytics-api
-    env: python
+    runtime: python
     plan: starter
+    region: oregon
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
+    startCommand: gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 --access-logfile - --error-logfile -
     healthCheckPath: /health
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
@@ -18,32 +21,39 @@ services:
         sync: false
       - key: SP_API_LWA_CLIENT_SECRET
         sync: false
-      - key: SP_API_AWS_ACCESS_KEY
-        sync: false
-      - key: SP_API_AWS_SECRET_KEY
-        sync: false
-      - key: SP_API_ROLE_ARN
-        sync: false
       - key: SP_API_MARKETPLACE_ID
         value: A21TJRUUN4KGV
       - key: APP_ENV
         value: production
       - key: LOG_LEVEL
         value: info
+      - key: ALLOWED_ORIGINS
+        sync: false  # Set to frontend URL after deploying frontend
+      - key: SELF_BASE_URL
+        sync: false  # Set to this service's own Render URL (e.g. https://qna-analytics-api.onrender.com)
+      - key: REFRESH_HOUR_IST
+        value: "19"  # 7 PM IST daily auto-refresh
 
-  # Next.js frontend (COGS + Profitability Dashboard)
+  # Next.js frontend (Dashboard)
   - type: web
     name: jh-halte-dashboard
-    env: node
+    runtime: node
     plan: starter
+    region: oregon
     rootDir: frontend
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /
     envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
-      - key: NODE_ENV
-        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_API_URL
+        sync: false  # Set to backend Render URL after deploying backend

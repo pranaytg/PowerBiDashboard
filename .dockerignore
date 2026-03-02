@@ -1,0 +1,42 @@
+# Frontend (separate service)
+frontend/
+
+# Version control
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Environment files (secrets managed via Render dashboard)
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# Data files
+*.xlsx
+*.csv
+*.pbix
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs
+README.md
+SYSTEM_ARCHITECTURE.md
+*.md

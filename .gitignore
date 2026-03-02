@@ -1,11 +1,42 @@
 # Python-generated files
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.pyo
 build/
 dist/
 wheels/
 *.egg-info
-.env
+*.egg
 
 # Virtual environments
-.venv
+.venv/
+venv/
+ENV/
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Data files (should not be in repo)
+*.xlsx
+*.csv
+*.pbix
+
+# Node (frontend managed separately)
+node_modules/
+.next/
+
+# Test / coverage
+htmlcov/
+.coverage
+.pytest_cache/

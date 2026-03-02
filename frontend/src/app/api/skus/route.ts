@@ -1,31 +1,31 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { query } from "@/lib/db";
 
-// GET /api/skus — get distinct SKUs from sales_data for dropdowns
 export async function GET() {
-    const { data, error } = await supabase
-        .from("sales_data")
-        .select("Sku, BRAND, Item Description, Category")
-        .not("Sku", "is", null)
-        .limit(5000);
+    try {
+        const { rows } = await query<{
+            Sku: string;
+            BRAND: string;
+            "Item Description": string;
+            Category: string;
+        }>(
+            `SELECT DISTINCT ON ("Sku") "Sku", "BRAND", "Item Description", "Category"
+             FROM sales_data
+             WHERE "Sku" IS NOT NULL
+             ORDER BY "Sku"`
+        );
 
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const result = rows.map((row) => ({
+            sku: row.Sku,
+            brand: row.BRAND || "",
+            name: row["Item Description"] || "",
+            category: row.Category || "",
+        }));
+
+        return NextResponse.json(result);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("SKUs API Error:", message);
+        return NextResponse.json({ error: message }, { status: 500 });
     }
-
-    // Deduplicate by SKU
-    const skuMap: Record<string, { sku: string; brand: string; name: string; category: string }> = {};
-    for (const row of data || []) {
-        const sku = row["Sku"];
-        if (sku && !skuMap[sku]) {
-            skuMap[sku] = {
-                sku,
-                brand: row["BRAND"] || "",
-                name: row["Item Description"] || "",
-                category: row["Category"] || "",
-            };
-        }
-    }
-
-    return NextResponse.json(Object.values(skuMap).sort((a, b) => a.sku.localeCompare(b.sku)));
 }

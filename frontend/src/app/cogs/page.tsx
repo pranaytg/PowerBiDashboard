@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { calculateCogs, CogsInput, CogsBreakdown } from "@/lib/calculations";
 
 interface CogsRecord {
@@ -64,6 +64,7 @@ export default function CogsPage() {
     const [saving, setSaving] = useState<string | null>(null);
     const [editRow, setEditRow] = useState<CogsRecord | null>(null);
     const [showForm, setShowForm] = useState(false);
+    const [showBulkForm, setShowBulkForm] = useState(false);
     const [expandedSku, setExpandedSku] = useState<string | null>(null);
     const [toast, setToast] = useState<Toast | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
@@ -93,6 +94,18 @@ export default function CogsPage() {
         }
         load();
     }, [showToast]);
+
+    async function loadData() {
+        setLoading(true);
+        try {
+            const cogsRes = await fetch("/api/cogs");
+            const cogsData = await cogsRes.json();
+            setRecords(Array.isArray(cogsData) ? cogsData : []);
+        } catch (e) {
+            console.error("Reload error:", e);
+        }
+        setLoading(false);
+    }
 
     // Save a record
     async function saveRecord(record: CogsRecord) {
@@ -185,9 +198,14 @@ export default function CogsPage() {
                         Manage Cost of Goods Sold for each SKU. All amounts in ₹ INR.
                     </p>
                 </div>
-                <button className="btn-primary" onClick={() => { setEditRow(emptyRecord()); setShowForm(true); }}>
-                    + Add SKU COGS
-                </button>
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+                    <button className="btn-secondary" onClick={() => setShowBulkForm(true)}>
+                        💹 Bulk Update Currency
+                    </button>
+                    <button className="btn-primary" onClick={() => { setEditRow(emptyRecord()); setShowForm(true); }}>
+                        + Add SKU COGS
+                    </button>
+                </div>
             </div>
 
             {/* Search */}
@@ -248,8 +266,8 @@ export default function CogsPage() {
                             filtered.map((r) => {
                                 const bd = getBreakdown(r);
                                 return (
-                                    <>
-                                        <tr key={r.sku}>
+                                    <React.Fragment key={r.sku}>
+                                        <tr key={`tr-${r.sku}`}>
                                             <td style={{ fontWeight: 600, fontFamily: "monospace", fontSize: "0.75rem" }}>{r.sku}</td>
                                             <td style={{ maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.product_name || "—"}</td>
                                             <td>{r.import_price.toFixed(2)}</td>
@@ -287,7 +305,7 @@ export default function CogsPage() {
                                                 </td>
                                             </tr>
                                         )}
-                                    </>
+                                    </React.Fragment>
                                 );
                             })
                         )}
@@ -311,6 +329,32 @@ export default function CogsPage() {
                 <div className={`toast ${toast.type === "success" ? "toast-success" : "toast-error"}`}>
                     {toast.message}
                 </div>
+            )}
+
+            {/* Bulk Update Modal */}
+            {showBulkForm && (
+                <BulkUpdateModal
+                    onSave={async (currency, rate) => {
+                        try {
+                            const res = await fetch("/api/cogs/bulk", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ currency, exchange_rate: rate }),
+                            });
+                            const data = await res.json();
+                            if (res.ok) {
+                                showToast(`Successfully updated ${data.updated} SKUs`, "success");
+                                setShowBulkForm(false);
+                                loadData();
+                            } else {
+                                showToast(data.error || "Update failed", "error");
+                            }
+                        } catch {
+                            showToast("Network error", "error");
+                        }
+                    }}
+                    onCancel={() => setShowBulkForm(false)}
+                />
             )}
         </div>
     );
@@ -524,6 +568,66 @@ function CogsFormModal({
                         ) : (
                             "Save COGS"
                         )}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/* ---- Bulk Update Modal Component ---- */
+function BulkUpdateModal({
+    onSave,
+    onCancel,
+}: {
+    onSave: (currency: string, rate: number) => void;
+    onCancel: () => void;
+}) {
+    const [currency, setCurrency] = useState("USD");
+    const [rate, setRate] = useState(83.5);
+    const [saving, setSaving] = useState(false);
+
+    return (
+        <div
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: "1rem" }}
+            onClick={onCancel}
+        >
+            <div
+                className="glass-card animate-fade-in"
+                style={{ width: "100%", maxWidth: "450px", padding: "2rem" }}
+                onClick={(e) => e.stopPropagation()}
+            >
+                <h2 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: "0.5rem" }}>Bulk Update Currency</h2>
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginBottom: "1.5rem" }}>
+                    Update the exchange rate for all SKUs using the specified currency.
+                </p>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    <div>
+                        <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.25rem", display: "block" }}>Currency to Update</label>
+                        <select className="select-field" style={{ width: "100%" }} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                            <option value="USD">USD ($)</option>
+                            <option value="EUR">EUR (€)</option>
+                            <option value="INR">INR (₹)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.25rem", display: "block" }}>New Exchange Rate</label>
+                        <input className="input-field" type="number" step="0.01" value={rate} onChange={(e) => setRate(parseFloat(e.target.value) || 0)} />
+                    </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
+                    <button className="btn-secondary" onClick={onCancel}>Cancel</button>
+                    <button
+                        className="btn-primary"
+                        disabled={saving}
+                        onClick={() => {
+                            setSaving(true);
+                            onSave(currency, rate);
+                        }}
+                    >
+                        {saving ? "Updating..." : "Apply to All SKUs"}
                     </button>
                 </div>
             </div>

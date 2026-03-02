@@ -2,13 +2,17 @@
 
 import logging
 import sys
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import get_settings
 from app.database import get_supabase_client
+from app.scheduler import start_scheduler, stop_scheduler
 from app.models import HealthResponse
 from app.routers import sales, refresh
 from app.services.supabase_service import SupabaseService
@@ -26,6 +30,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# ---- Middleware ----
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Attach a unique request ID to every request for tracing."""
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
 # ---- Lifespan ----
 
 @asynccontextmanager
@@ -38,7 +55,11 @@ async def lifespan(app: FastAPI):
         logger.info("Supabase client connected successfully")
     except Exception as e:
         logger.warning("Supabase connection warning: %s", e)
+    # Start background scheduler (keep-alive + daily refresh)
+    start_scheduler()
     yield
+    # Shutdown
+    stop_scheduler()
     logger.info("Shutting down QnA Analytics API")
 
 
@@ -53,19 +74,50 @@ app = FastAPI(
     ),
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.app_env != "production" else None,
+    redoc_url="/redoc" if settings.app_env != "production" else None,
 )
+
+# ---- Request ID Middleware ----
+app.add_middleware(RequestIDMiddleware)
 
 # ---- CORS ----
 
+origins = [
+    o.strip()
+    for o in settings.allowed_origins.split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---- Global Exception Handler ----
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all for unhandled exceptions — returns structured JSON."""
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.error(
+        "Unhandled exception [request_id=%s]: %s",
+        request_id,
+        exc,
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "request_id": request_id,
+        },
+    )
+
 
 # ---- Routers ----
 
