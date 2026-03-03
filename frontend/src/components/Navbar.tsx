@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 const navItems = [
     { href: "/", label: "Dashboard", icon: "📊" },
@@ -13,6 +13,16 @@ const navItems = [
 
 export default function Navbar() {
     const pathname = usePathname();
+    const router = useRouter();
+
+    // Hide navbar on login page
+    if (pathname === "/login") return null;
+
+    const handleLogout = async () => {
+        await fetch("/api/auth/logout", { method: "POST" });
+        router.push("/login");
+        router.refresh();
+    };
 
     return (
         <nav
@@ -68,7 +78,7 @@ export default function Navbar() {
                 </span>
             </Link>
 
-            <div style={{ display: "flex", gap: "0.25rem" }}>
+            <div style={{ display: "flex", gap: "0.25rem", alignItems: "center" }}>
                 {navItems.map((item) => {
                     const isActive = pathname === item.href;
                     return (
@@ -101,7 +111,30 @@ export default function Navbar() {
                         </Link>
                     );
                 })}
+
+                {/* Logout button */}
+                <button
+                    onClick={handleLogout}
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.375rem",
+                        padding: "0.5rem 0.875rem",
+                        borderRadius: "8px",
+                        fontSize: "0.8125rem",
+                        fontWeight: 500,
+                        color: "var(--accent-rose)",
+                        background: "transparent",
+                        border: "1px solid transparent",
+                        cursor: "pointer",
+                        transition: "all 0.2s",
+                        marginLeft: "0.5rem",
+                    }}
+                >
+                    🚪 Logout
+                </button>
             </div>
         </nav>
     );
 }
+
