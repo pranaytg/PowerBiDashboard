@@ -351,3 +351,192 @@ class SPAPIService:
         doc_id = self.wait_for_report(report_id)
         data = self.download_report(doc_id)
         return data
+
+    # ------------------------------------------------------------------ #
+    #  Catalog Items API  (product metadata, images, titles)
+    # ------------------------------------------------------------------ #
+
+    def fetch_catalog_item(self, asin: str) -> dict:
+        """Fetch catalog info for a single ASIN.
+
+        Returns dict with: asin, title, brand, image_url, category, etc.
+        """
+        marketplace = self.settings.sp_api_marketplace_id
+        params = {
+            "marketplaceIds": marketplace,
+            "includedData": "attributes,images,summaries",
+        }
+        try:
+            result = self._make_request(
+                "GET",
+                f"/catalog/2022-04-01/items/{asin}",
+                params=params,
+            )
+            item = {}
+            item["asin"] = result.get("asin", asin)
+
+            # Extract title + brand from summaries
+            summaries = result.get("summaries", [])
+            if summaries:
+                s = summaries[0]
+                item["title"] = s.get("itemName", "")
+                item["brand"] = s.get("brand", "")
+                item["color"] = s.get("color", "")
+                item["size"] = s.get("size", "")
+                item["classification"] = (
+                    s.get("classificationNode", {}).get("displayName", "")
+                )
+
+            # Extract main image
+            images = result.get("images", [])
+            if images:
+                img_list = images[0].get("images", [])
+                for img in img_list:
+                    if img.get("variant") == "MAIN":
+                        item["image_url"] = img.get("link", "")
+                        break
+                if not item.get("image_url") and img_list:
+                    item["image_url"] = img_list[0].get("link", "")
+
+            return item
+        except Exception as e:
+            logger.warning("Catalog fetch failed for ASIN %s: %s", asin, e)
+            return {"asin": asin, "error": str(e)}
+
+    def fetch_catalog_batch(self, asins: list[str]) -> list[dict]:
+        """Fetch catalog info for a batch of ASINs (with rate limiting)."""
+        results = []
+        for i, asin in enumerate(asins):
+            if i > 0 and i % 5 == 0:
+                time.sleep(1)  # Rate limit: ~5 req/sec
+            item = self.fetch_catalog_item(asin)
+            if "error" not in item:
+                results.append(item)
+        logger.info("Fetched catalog data for %d/%d ASINs", len(results), len(asins))
+        return results
+
+    # ------------------------------------------------------------------ #
+    #  Finances API  (fees, settlements, refunds)
+    # ------------------------------------------------------------------ #
+
+    def fetch_financial_events(
+        self,
+        start_date: str,
+        end_date: str,
+        max_pages: int = 20,
+    ) -> list[dict]:
+        """Fetch financial event groups from the Finances API.
+
+        Returns a flat list of shipment-level financial events with fee breakdowns.
+        """
+        params = {
+            "PostedAfter": f"{start_date}T00:00:00Z",
+            "PostedBefore": f"{end_date}T23:59:59Z",
+            "MaxResultsPerPage": 100,
+        }
+        all_events = []
+        next_token = None
+
+        for page in range(max_pages):
+            if next_token:
+                params["NextToken"] = next_token
+
+            result = self._make_request(
+                "GET",
+                "/finances/v0/financialEvents",
+                params=params,
+            )
+            payload = result.get("payload", {})
+            events = payload.get("FinancialEvents", {})
+
+            # Extract shipment events (order-level fees)
+            for group in events.get("ShipmentEventList", []):
+                order_id = group.get("AmazonOrderId", "")
+                posted = group.get("PostedDate", "")
+                for item in group.get("ShipmentItemList", []):
+                    event = {
+                        "order_id": order_id,
+                        "posted_date": posted,
+                        "sku": item.get("SellerSKU", ""),
+                        "asin": item.get("ASIN", ""),
+                        "quantity": item.get("QuantityShipped", 0),
+                        "event_type": "Shipment",
+                    }
+                    # Item charges (principal, tax, etc.)
+                    total_charge = 0
+                    for charge in item.get("ItemChargeList", []):
+                        amt = charge.get("ChargeAmount", {})
+                        val = float(amt.get("CurrencyAmount", 0))
+                        event[f"charge_{charge.get('ChargeType', 'other')}"] = val
+                        total_charge += val
+                    event["total_charges"] = total_charge
+
+                    # Item fees (commission, FBA fees, etc.)
+                    total_fee = 0
+                    for fee in item.get("ItemFeeList", []):
+                        amt = fee.get("FeeAmount", {})
+                        val = float(amt.get("CurrencyAmount", 0))
+                        event[f"fee_{fee.get('FeeType', 'other')}"] = val
+                        total_fee += val
+                    event["total_fees"] = total_fee
+                    event["net_amount"] = total_charge + total_fee
+
+                    all_events.append(event)
+
+            # Extract refund events
+            for group in events.get("RefundEventList", []):
+                order_id = group.get("AmazonOrderId", "")
+                posted = group.get("PostedDate", "")
+                for item in group.get("ShipmentItemAdjustmentList", []):
+                    event = {
+                        "order_id": order_id,
+                        "posted_date": posted,
+                        "sku": item.get("SellerSKU", ""),
+                        "asin": item.get("ASIN", ""),
+                        "quantity": item.get("QuantityShipped", 0),
+                        "event_type": "Refund",
+                    }
+                    total_adj = 0
+                    for charge in item.get("ItemChargeAdjustmentList", []):
+                        amt = charge.get("ChargeAmount", {})
+                        val = float(amt.get("CurrencyAmount", 0))
+                        event[f"charge_{charge.get('ChargeType', 'other')}"] = val
+                        total_adj += val
+                    for fee in item.get("ItemFeeAdjustmentList", []):
+                        amt = fee.get("FeeAmount", {})
+                        val = float(amt.get("CurrencyAmount", 0))
+                        event[f"fee_{fee.get('FeeType', 'other')}"] = val
+                        total_adj += val
+                    event["net_amount"] = total_adj
+                    all_events.append(event)
+
+            next_token = payload.get("NextToken")
+            if not next_token:
+                break
+
+        logger.info("Fetched %d financial events for %s to %s", len(all_events), start_date, end_date)
+        return all_events
+
+    # ------------------------------------------------------------------ #
+    #  Returns Report  (FBA returns via report API)
+    # ------------------------------------------------------------------ #
+
+    def fetch_returns_report(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> list[dict]:
+        """Fetch FBA returns report data.
+
+        Uses GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA report type.
+        Returns list of return records.
+        """
+        report_type = "GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA"
+        try:
+            data = self.fetch_report_data(report_type, start_date, end_date)
+            logger.info("Fetched %d returns records for %s to %s", len(data), start_date, end_date)
+            return data
+        except Exception as e:
+            logger.error("Returns report fetch failed: %s", e)
+            raise
+

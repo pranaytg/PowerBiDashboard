@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.database import get_supabase_client
 from app.scheduler import start_scheduler, stop_scheduler
 from app.models import HealthResponse
-from app.routers import sales, refresh
+from app.routers import sales, refresh, sp_data
 from app.services.supabase_service import SupabaseService
 
 # ---- Logging ----
