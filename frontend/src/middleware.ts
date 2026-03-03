@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PROTECTED_PATHS = ["/", "/cogs", "/profitability", "/inventory", "/shipments"];
+const PROTECTED_PATHS = ["/", "/cogs", "/profitability", "/finances", "/returns", "/inventory", "/shipments"];
 const PUBLIC_PATHS = ["/login"];
 const API_PATHS = ["/api/auth/login", "/api/auth/logout", "/api/auth/me"];
 

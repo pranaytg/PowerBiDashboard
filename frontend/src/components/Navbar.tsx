@@ -6,8 +6,10 @@ import { usePathname, useRouter } from "next/navigation";
 const navItems = [
     { href: "/", label: "Dashboard", icon: "📊" },
     { href: "/cogs", label: "COGS", icon: "💰" },
-    { href: "/profitability", label: "Sales & Profitability", icon: "📈" },
-    { href: "/inventory", label: "Inventory AI", icon: "🔮" },
+    { href: "/profitability", label: "Profitability", icon: "📈" },
+    { href: "/finances", label: "Finances", icon: "🏦" },
+    { href: "/returns", label: "Returns", icon: "↩️" },
+    { href: "/inventory", label: "Inventory", icon: "🔮" },
     { href: "/shipments", label: "Shipments", icon: "🚚" },
 ];
 

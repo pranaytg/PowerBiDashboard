@@ -123,6 +123,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 app.include_router(sales.router)
 app.include_router(refresh.router)
+app.include_router(sp_data.router)
 
 
 # ---- Root & Health ----
