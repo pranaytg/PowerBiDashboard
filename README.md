@@ -1,221 +1,252 @@
-# QnA Analytics API
+# QnA Analytics — JH-Halte Dashboard
 
-Production-grade FastAPI service for Amazon sales data analytics with Supabase backend.
+**Monorepo**: FastAPI backend + Next.js 16 frontend deployed on Render.
 
-## Features
+Amazon SP-API powered analytics dashboard for tracking sales, COGS, profitability, shipments, and inventory forecasting for JH-Halte brands.
 
-- **Amazon SP-API Integration**: Fetches B2B/B2C MTR reports automatically
-- **Supabase Database**: Stores all sales data with Power BI-compatible column names
-- **Refresh Tracking**: Tracks every SP-API call with date ranges and status
-- **Power BI Compatible**: Column names match `combined2.xlsx` headers exactly
-- **Easy Deployment**: Docker, Render, Railway, Heroku ready
+---
 
-## Quick Start
-
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure Environment
-
-Edit `.env` with your credentials:
-
-```env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-supabase-anon-key
-
-# SP-API (get from Amazon Seller Central > Developer Central)
-SP_API_REFRESH_TOKEN=your_refresh_token
-SP_API_LWA_APP_ID=your_lwa_app_id
-SP_API_LWA_CLIENT_SECRET=your_lwa_client_secret
-SP_API_AWS_ACCESS_KEY=your_aws_access_key
-SP_API_AWS_SECRET_KEY=your_aws_secret_key
-SP_API_ROLE_ARN=your_role_arn
-SP_API_MARKETPLACE_ID=A21TJRUUN4KGV
-```
-
-> **Note on Supabase Key**: Go to Supabase Dashboard > Project Settings > API > Project API keys. Use the **anon/public** key (JWT format starting with `eyJ...`). For write operations, you may need the **service_role** key.
-
-### 3. Create Database Tables
-
-1. Go to your **Supabase Dashboard > SQL Editor**
-2. Copy the contents of `scripts/init_db.sql`
-3. Run the SQL
-
-### 4. Upload Excel Data
-
-```bash
-python -m scripts.upload_excel
-# Or with options:
-python -m scripts.upload_excel --truncate  # Clear existing data first
-```
-
-### 5. Start the API
-
-```bash
-# Development
-uvicorn app.main:app --reload --port 8000
-
-# Production
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
-```
-
-## API Endpoints
-
-| Method | Endpoint                  | Description                            |
-| ------ | ------------------------- | -------------------------------------- |
-| GET    | `/`                       | API info                               |
-| GET    | `/health`                 | Health check with system status        |
-| GET    | `/docs`                   | Swagger UI documentation               |
-| GET    | `/api/v1/sales`           | Get sales data (paginated, filterable) |
-| GET    | `/api/v1/sales/count`     | Get total record count                 |
-| GET    | `/api/v1/sales/filters`   | Get available filter values            |
-| GET    | `/api/v1/sales/summary`   | Get sales summary                      |
-| POST   | `/api/v1/refresh`         | Trigger SP-API data refresh            |
-| GET    | `/api/v1/refresh/status`  | Get current refresh status             |
-| GET    | `/api/v1/refresh/history` | Get refresh history                    |
-
-### Query Parameters for `/api/v1/sales`
-
-- `page` - Page number (default: 1)
-- `per_page` - Records per page (default: 1000, max: 10000)
-- `date_from` / `date_to` - Date range filter (YYYY-MM-DD)
-- `year` - Filter by year
-- `channel` - Filter by channel (e.g., amazon)
-- `business` - Filter by business type (b2b/b2c)
-- `brand` - Filter by brand
-- `category` - Filter by category
-- `transaction_type` - Filter by transaction type
-- `source` - Filter by fiscal year (e.g., fy2025)
-- `asin` - Filter by ASIN
-- `order_id` - Filter by Order ID
-
-### Refresh Request Body
-
-```json
-{
-  "date_from": "2025-01-01",
-  "date_to": "2025-02-24",
-  "report_types": ["B2C", "B2B"]
-}
-```
-
-If no dates are specified, it fetches from the last successful refresh date to today.
-
-## Deployment
-
-### Docker
-
-```bash
-docker-compose up -d
-```
-
-### Render
-
-Push to GitHub and connect to Render. The `render.yaml` is pre-configured.
-
-### Railway / Heroku
-
-```bash
-# Uses the Procfile automatically
-git push railway main
-# or
-git push heroku main
-```
-
-## Connecting Power BI to Supabase
-
-### Option 1: Direct PostgreSQL Connection (Recommended)
-
-1. In Power BI Desktop: **Get Data > PostgreSQL Database**
-2. Server: `db.yquqkoeptxqgfaiatstk.supabase.co`
-3. Port: `5432`
-4. Database: `postgres`
-5. Username: `postgres`
-6. Password: Your Supabase database password (from Dashboard > Settings > Database)
-7. Select the `sales_data` table
-
-### Option 2: REST API (Web Connector)
-
-1. In Power BI Desktop: **Get Data > Web**
-2. URL: `https://your-api-url/api/v1/sales?per_page=10000`
-3. Power BI will parse the JSON response
-4. Expand the `data` column to get individual records
-
-### Option 3: OData Feed
-
-Use the Supabase PostgREST endpoint directly:
-
-- URL: `https://yquqkoeptxqgfaiatstk.supabase.co/rest/v1/sales_data`
-- Add header: `apikey: your-supabase-key`
-
-## Data Schema
-
-All 30 columns match `combined2.xlsx` exactly:
-
-| Column                 | Type    | Example                |
-| ---------------------- | ------- | ---------------------- |
-| Date                   | text    | 2023-04-01             |
-| Year                   | integer | 2023                   |
-| Month_Num              | integer | 4                      |
-| Month_Name             | text    | april                  |
-| Month_Year             | text    | apr 2023               |
-| Quarter                | integer | 2                      |
-| Quarter_Name           | text    | q2                     |
-| Business               | text    | b2c                    |
-| Invoice Number         | text    | in-32                  |
-| Invoice Date           | text    | 2023-04-08 19:37:25    |
-| Transaction Type       | text    | shipment               |
-| Order Id               | text    | 406-3085594-8194727    |
-| Quantity               | integer | 1                      |
-| BRAND                  | text    | bkr                    |
-| Item Description       | text    | bkr stainless steel... |
-| Asin                   | text    | b07zj4zcqv             |
-| Sku                    | text    | lg0546                 |
-| Category               | text    | fogging machine        |
-| Segment                | text    | agriculture            |
-| Ship To City           | text    | aliganj                |
-| Ship To State          | text    | uttar pradesh          |
-| Ship To Country        | text    | in                     |
-| Ship To Postal Code    | text    | 207244                 |
-| Invoice Amount         | numeric | 32300                  |
-| Principal Amount       | numeric | 32000                  |
-| Warehouse Id           | text    | (nullable)             |
-| Customer Bill To Gstid | text    | (nullable)             |
-| Buyer Name             | text    | (nullable)             |
-| Source                 | text    | fy2023                 |
-| Channel                | text    | amazon                 |
-
-> **Note**: Column names (headers) maintain their exact case from the Excel file. All string data values are lowercase.
-
-## Project Structure
+## Architecture
 
 ```
 qna/
-├── .env                          # Environment configuration
-├── requirements.txt              # Python dependencies
-├── Dockerfile                    # Docker container config
-├── docker-compose.yml            # Docker Compose config
-├── Procfile                      # Heroku/Railway deployment
-├── render.yaml                   # Render deployment
-├── combined2.xlsx                # Source data file
-├── UpdatedUltimateDashboard.pbix # Power BI dashboard
-├── app/
-│   ├── __init__.py
-│   ├── main.py                   # FastAPI app entry point
-│   ├── config.py                 # Settings management
-│   ├── database.py               # Supabase client
-│   ├── models.py                 # Pydantic models
+├── app/                          # FastAPI backend (Python)
+│   ├── main.py                   # App entry, CORS, middleware, lifespan
+│   ├── config.py                 # Pydantic Settings (env vars)
+│   ├── database.py               # Supabase client singleton
+│   ├── models.py                 # Pydantic response models
+│   ├── scheduler.py              # APScheduler: keep-alive ping + daily 7PM IST refresh
 │   ├── routers/
-│   │   ├── sales.py              # Sales data endpoints
-│   │   └── refresh.py            # SP-API refresh endpoints
+│   │   ├── sales.py              # GET /api/v1/sales
+│   │   └── refresh.py            # POST /api/v1/refresh (SP-API → Supabase)
 │   └── services/
-│       ├── supabase_service.py   # Database operations
-│       ├── sp_api_service.py     # Amazon SP-API integration
-│       └── data_processor.py     # Data transformation
-└── scripts/
-    ├── init_db.sql               # Database schema SQL
-    └── upload_excel.py           # Excel data uploader
+│       ├── sp_api_service.py     # Amazon SP-API client (Orders API + Reports)
+│       ├── supabase_service.py   # Supabase CRUD operations
+│       └── data_processor.py     # Transform SP-API data → DB format
+├── frontend/                     # Next.js 16 (App Router)
+│   ├── src/
+│   │   ├── middleware.ts         # Auth middleware — protects all routes
+│   │   ├── app/
+│   │   │   ├── page.tsx          # Dashboard (KPIs, area chart, bar charts, pie charts)
+│   │   │   ├── login/page.tsx    # Admin login page
+│   │   │   ├── cogs/page.tsx     # COGS management (add/edit/delete per SKU)
+│   │   │   ├── profitability/    # Order-level profitability table
+│   │   │   ├── shipments/        # Shipment cost tracking
+│   │   │   ├── inventory/        # AI inventory prediction (Holt-Winters)
+│   │   │   └── api/              # Next.js API routes (DB queries)
+│   │   │       ├── auth/         # login, logout, me
+│   │   │       ├── sales/        # Sales data from Supabase
+│   │   │       ├── cogs/         # COGS CRUD
+│   │   │       ├── profitability/# Joined sales+cogs+shipments
+│   │   │       ├── shipments/    # Shipment CRUD
+│   │   │       ├── inventory/    # Holt-Winters forecasting
+│   │   │       └── skus/         # Distinct SKU list
+│   │   ├── lib/
+│   │   │   ├── db.ts             # PostgreSQL connection pool (pg)
+│   │   │   └── calculations.ts   # COGS calculation logic
+│   │   └── components/
+│   │       └── Navbar.tsx        # Nav with logout button
+│   └── next.config.mjs          # output: "standalone"
+├── render.yaml                   # Render Blueprint (both services)
+├── Dockerfile                    # Backend Docker image
+├── Procfile                      # Gunicorn start command
+├── requirements.txt              # Python deps
+└── .env                          # Backend env vars (local only)
 ```
+
+---
+
+## Tech Stack
+
+| Layer | Tech |
+|-------|------|
+| Backend | FastAPI, Gunicorn, Uvicorn |
+| Frontend | Next.js 16, React 19, Recharts |
+| Database | Supabase (PostgreSQL) |
+| Data Source | Amazon SP-API (Orders API) |
+| Styling | Vanilla CSS (dark theme, glassmorphism) |
+| Scheduler | APScheduler (keep-alive + daily refresh) |
+| Auth | Cookie-based session (single admin) |
+| Deployment | Render (monorepo, 2 web services) |
+
+---
+
+## Environment Variables
+
+### Backend (`.env`)
+
+```env
+SUPABASE_URL=https://yquqkoeptxqgfaiatstk.supabase.co
+SUPABASE_KEY=<service_role_key>
+SP_API_REFRESH_TOKEN=<your_refresh_token>
+SP_API_LWA_APP_ID=amzn1.application-oa2-client.53f81bc5b925435cafc071d95d32e077
+SP_API_LWA_CLIENT_SECRET=<your_secret>
+SP_API_MARKETPLACE_ID=A21TJRUUN4KGV
+APP_ENV=development          # or "production"
+LOG_LEVEL=info
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+SELF_BASE_URL=http://localhost:8000
+REFRESH_HOUR_IST=19          # 7 PM daily auto-refresh
+```
+
+### Frontend (`frontend/.env.local`)
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://yquqkoeptxqgfaiatstk.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon_key>
+DATABASE_URL=postgresql://postgres:RamanSir1234%40@db.yquqkoeptxqgfaiatstk.supabase.co:5432/postgres
+ADMIN_EMAIL=admin@jhhalte.com
+ADMIN_PASSWORD=JHHalte@2025
+ADMIN_SESSION_SECRET=jh_halte_s3cr3t_k3y_f0r_s3ss10n_2025
+```
+
+> **Render**: use Supabase Connection Pooler URL for `DATABASE_URL`:
+> `postgresql://postgres.yquqkoeptxqgfaiatstk:RamanSir1234%40@aws-1-ap-south-1.pooler.supabase.com:5432/postgres`
+
+---
+
+## Local Development
+
+```bash
+# Backend
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --port 8000
+
+# Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+- Backend: http://localhost:8000 (health: `/health`, docs: `/docs`)
+- Frontend: http://localhost:3000 (login: `admin@jhhalte.com` / `JHHalte@2025`)
+
+---
+
+## Render Deployment
+
+**Blueprint**: Push to GitHub → Render → New → Blueprint → auto-detects `render.yaml`
+
+### Backend Service (`qna-analytics-api`)
+- Runtime: Python 3.12
+- Build: `pip install -r requirements.txt`
+- Start: `gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:$PORT --timeout 120`
+
+### Frontend Service (`jh-halte-dashboard`)
+- Runtime: Node 20
+- Root Dir: `frontend`
+- Build: `npm install && npm run build`
+- Start: `npm start`
+
+### Post-Deploy Checklist
+1. Set `SELF_BASE_URL` = backend Render URL
+2. Set `ALLOWED_ORIGINS` = frontend Render URL
+3. Set `NEXT_PUBLIC_API_URL` = backend Render URL on frontend
+4. Add all `ADMIN_*` env vars on frontend
+5. **Redeploy both** to pick up cross-references
+
+### Keep-Alive
+- Built-in: APScheduler self-ping every 13 min
+- Recommended: [UptimeRobot](https://uptimerobot.com) free monitor on `/health`
+
+---
+
+## Database Schema (Supabase)
+
+### `sales` table (main data, ~30k+ records)
+Populated by SP-API Orders API. Key columns:
+- `Order Id`, `SKU`, `ASIN`, `Item Description`
+- `Invoice Amount`, `Quantity`, `Purchase Date`
+- `Ship To State`, `Ship To City`, `Fulfillment`
+- `Source` (Orders_API / GST_MTR), `Channel`
+
+### `product_catalog` table
+- `asin` (PK), `brand`, `category`, `segment`
+
+### `cogs_config` table
+- `sku` (PK), `import_price`, `currency`, `exchange_rate`
+- `custom_duty_pct`, `gst1_pct`, `shipping_cost`
+- `margin1_pct`, `marketing_cost`, `margin2_pct`, `gst2_pct`
+- Computed: `landed_cost`, `halte_cost_price`, `selling_price`, `msp`
+
+### `shipments` table
+- `order_id`, `sku`, `shipping_cost`, `carrier`, `tracking_number`, `shipped_date`
+
+### `refresh_logs` table
+- `report_type`, `status`, `records_fetched`, `date_range_start/end`
+
+---
+
+## SP-API Integration
+
+### Current Capabilities
+- **Orders API**: Fetch orders + line items, extract SKU/ASIN/pricing/shipping
+- **Reports API**: GST MTR B2B/B2C reports (fallback)
+- **Auto-refresh**: Daily at 7 PM IST via APScheduler
+
+### Current Permissions Required
+- `Inventory and Order Tracking` role
+
+### Pending Features (not yet implemented)
+1. **Returns/Refunds** — FBA Returns Reports API
+2. **Catalog Info** — Catalog Items API (product images, titles by ASIN)
+3. **Financial Data** — Finances API (fees, settlements, refunds)
+
+These would require:
+- New methods in `app/services/sp_api_service.py`
+- New Supabase tables
+- New backend router endpoints
+- New frontend pages/components
+
+---
+
+## COGS Calculation Flow
+
+```
+Import Price (foreign currency)
+  × Exchange Rate
+  = Import Price INR
+  + Custom Duty (% of import)
+  + GST1 (% of import + duty)
+  + Shipping Cost
+  = Landed Cost
+  + JH Margin (M1 %)
+  = Halte Cost Price  (JH → Halte transfer price)
+  + Marketing Cost
+  + Halte Margin (M2 %)
+  = Selling Price
+  + GST2 (% of selling)
+  = MSP (Minimum Selling Price)
+```
+
+Logic in: `frontend/src/lib/calculations.ts`
+
+---
+
+## Auth System
+
+- **Single admin account** (no registration)
+- Credentials stored as env vars: `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`
+- `middleware.ts` checks `admin_session` cookie on every request
+- Cookie: httpOnly, secure in production, 7-day expiry
+- API routes: `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`
+
+---
+
+## Key Design Decisions
+
+1. **Frontend queries DB directly** via `pg` pool in API routes (not through backend)
+2. **Backend** only handles SP-API data fetching/processing → stores in Supabase
+3. **COGS** are managed entirely on the frontend (CRUD via Next.js API routes)
+4. **Profitability** is computed by joining sales + cogs_config + shipments in SQL
+5. **No ORM** — raw SQL queries in frontend API routes for performance
+6. **Monorepo** — single GitHub repo, Render deploys with `rootDir` for frontend
+
+---
+
+## Known Issues / Notes
+
+- Next.js 16 shows `middleware` deprecation warning (will need migration to `proxy` in future)
+- Render free tier spins down after 15 min inactivity (self-ping mitigates)
+- Database values from Supabase can be `null` — always use `Number(val) || 0` in frontend
+- `DATABASE_URL` on Render must use Supabase **Connection Pooler** (IPv4) not direct (IPv6)
