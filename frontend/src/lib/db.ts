@@ -1,4 +1,4 @@
-import { Pool, QueryResult } from "pg";
+import { Pool, QueryResult, QueryResultRow } from "pg";
 
 // Single pool instance reused across all API routes
 const pool = new Pool({
@@ -13,7 +13,7 @@ const pool = new Pool({
  * Run a parameterized SQL query against the database.
  * Returns the rows and rowCount from the query result.
  */
-export async function query<T = Record<string, unknown>>(
+export async function query<T extends QueryResultRow = Record<string, unknown>>(
     text: string,
     params?: unknown[]
 ): Promise<{ rows: T[]; rowCount: number }> {
@@ -25,7 +25,7 @@ export async function query<T = Record<string, unknown>>(
  * Run a query and return the count via a separate COUNT(*) query.
  * Useful for paginated endpoints.
  */
-export async function queryWithCount<T = Record<string, unknown>>(
+export async function queryWithCount<T extends QueryResultRow = Record<string, unknown>>(
     dataQuery: string,
     countQuery: string,
     params?: unknown[],
