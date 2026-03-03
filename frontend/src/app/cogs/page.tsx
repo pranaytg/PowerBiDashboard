@@ -158,16 +158,16 @@ export default function CogsPage() {
     // Compute live breakdown for a record
     function getBreakdown(record: CogsRecord): CogsBreakdown {
         const input: CogsInput = {
-            import_price: record.import_price,
+            import_price: Number(record.import_price) || 0,
             currency: record.currency,
-            exchange_rate: record.exchange_rate,
-            custom_duty_pct: record.custom_duty_pct,
-            gst1_pct: record.gst1_pct,
-            shipping_cost: record.shipping_cost,
-            margin1_pct: record.margin1_pct,
-            marketing_cost: record.marketing_cost,
-            margin2_pct: record.margin2_pct,
-            gst2_pct: record.gst2_pct,
+            exchange_rate: Number(record.exchange_rate) || 1,
+            custom_duty_pct: Number(record.custom_duty_pct) || 0,
+            gst1_pct: Number(record.gst1_pct) || 0,
+            shipping_cost: Number(record.shipping_cost) || 0,
+            margin1_pct: Number(record.margin1_pct) || 0,
+            marketing_cost: Number(record.marketing_cost) || 0,
+            margin2_pct: Number(record.margin2_pct) || 0,
+            gst2_pct: Number(record.gst2_pct) || 0,
         };
         return calculateCogs(input);
     }
@@ -270,19 +270,19 @@ export default function CogsPage() {
                                         <tr key={`tr-${r.sku}`}>
                                             <td style={{ fontWeight: 600, fontFamily: "monospace", fontSize: "0.75rem" }}>{r.sku}</td>
                                             <td style={{ maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.product_name || "—"}</td>
-                                            <td>{r.import_price.toFixed(2)}</td>
+                                            <td>{(Number(r.import_price) || 0).toFixed(2)}</td>
                                             <td><span className="badge badge-success">{r.currency}</span></td>
-                                            <td>{r.exchange_rate}</td>
-                                            <td>{r.custom_duty_pct}%</td>
-                                            <td>{r.gst1_pct}%</td>
-                                            <td>₹{r.shipping_cost}</td>
+                                            <td>{Number(r.exchange_rate) || 0}</td>
+                                            <td>{Number(r.custom_duty_pct) || 0}%</td>
+                                            <td>{Number(r.gst1_pct) || 0}%</td>
+                                            <td>₹{Number(r.shipping_cost) || 0}</td>
                                             <td style={{ fontWeight: 600, color: "var(--accent-amber)" }}>₹{bd.landed_cost.toFixed(2)}</td>
-                                            <td>{r.margin1_pct}%</td>
+                                            <td>{Number(r.margin1_pct) || 0}%</td>
                                             <td style={{ fontWeight: 600, color: "var(--accent-sky)" }}>₹{bd.halte_cost_price.toFixed(2)}</td>
-                                            <td>₹{r.marketing_cost}</td>
-                                            <td>{r.margin2_pct}%</td>
+                                            <td>₹{Number(r.marketing_cost) || 0}</td>
+                                            <td>{Number(r.margin2_pct) || 0}%</td>
                                             <td style={{ fontWeight: 600, color: "var(--accent-indigo-light)" }}>₹{bd.selling_price.toFixed(2)}</td>
-                                            <td>{r.gst2_pct}%</td>
+                                            <td>{Number(r.gst2_pct) || 0}%</td>
                                             <td style={{ fontWeight: 700, color: "var(--accent-emerald)" }}>₹{bd.msp.toFixed(2)}</td>
                                             <td>
                                                 <div style={{ display: "flex", gap: "0.375rem" }}>
