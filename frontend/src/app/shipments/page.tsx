@@ -154,7 +154,7 @@ export default function ShipmentsPage() {
                             <tr key={r.id}>
                                 <td style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{r.order_id}</td>
                                 <td style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{r.sku || "—"}</td>
-                                <td style={{ fontWeight: 600, color: "var(--accent-amber)" }}>₹{(r.shipping_cost || 0).toFixed(2)}</td>
+                                <td style={{ fontWeight: 600, color: "var(--accent-amber)" }}>₹{Number(r.shipping_cost || 0).toFixed(2)}</td>
                                 <td>{r.carrier || "—"}</td>
                                 <td style={{ fontFamily: "monospace", fontSize: "0.6875rem" }}>{r.tracking_number || "—"}</td>
                                 <td style={{ color: "var(--text-secondary)", fontSize: "0.75rem" }}>{r.shipped_date || "—"}</td>
