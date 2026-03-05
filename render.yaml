@@ -54,6 +54,13 @@ services:
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
       - key: DATABASE_URL
+        sync: false  # Supabase Connection Pooler URL
+      - key: BACKEND_URL
+        sync: false  # Set to backend Render URL (e.g. https://qna-analytics-api.onrender.com)
+      - key: ADMIN_EMAIL
         sync: false
-      - key: NEXT_PUBLIC_API_URL
-        sync: false  # Set to backend Render URL after deploying backend
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_SESSION_SECRET
+        sync: false
+
