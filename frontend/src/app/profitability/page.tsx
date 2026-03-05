@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 
 interface ProfitRow {
     order_id: string;
@@ -197,7 +197,7 @@ export default function ProfitabilityPage() {
                             {rows.length === 0 ? (
                                 <tr><td colSpan={13} style={{ textAlign: "center", padding: "3rem", color: "var(--text-muted)" }}>No data found. Add COGS for your SKUs to see profitability.</td></tr>
                             ) : rows.map((r, i) => (
-                                <>
+                                <React.Fragment key={i}>
                                     <tr key={i}>
                                         <td>
                                             {r.cogs_available && (
@@ -268,7 +268,7 @@ export default function ProfitabilityPage() {
                                             </td>
                                         </tr>
                                     )}
-                                </>
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>

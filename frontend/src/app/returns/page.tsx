@@ -75,7 +75,11 @@ export default function ReturnsPage() {
     async function syncReturns() {
         setSyncing(true);
         try {
-            const res = await fetch("http://localhost:8000/api/v1/returns/sync?date_from=2026-01-01&date_to=2026-03-03", { method: "POST" });
+            const res = await fetch("/api/sync", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ date_from: "2026-01-01", date_to: new Date().toISOString().split("T")[0], report_types: ["RETURNS"] }),
+            });
             const json = await res.json();
             alert(json.message || "Sync started!");
             setTimeout(async () => {

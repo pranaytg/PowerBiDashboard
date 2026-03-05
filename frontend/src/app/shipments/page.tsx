@@ -96,7 +96,7 @@ export default function ShipmentsPage() {
             (r.carrier || "").toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    const totalShipping = filtered.reduce((s, r) => s + (r.shipping_cost || 0), 0);
+    const totalShipping = filtered.reduce((s, r) => s + (Number(r.shipping_cost) || 0), 0);
 
     if (loading) {
         return (
