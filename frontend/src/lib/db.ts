@@ -1,12 +1,40 @@
 import { Pool, QueryResult, QueryResultRow } from "pg";
 
-// Single pool instance reused across all API routes
+/**
+ * Production-grade PostgreSQL connection pool.
+ *
+ * Key settings to prevent "connection lost" on Render + Supabase free tier:
+ *
+ * 1. keepAlive: true          — sends TCP keepalive packets so Supabase doesn't
+ *                                kill the connection for being "idle"
+ * 2. keepAliveInitialDelayMs  — start keepalive probes after 30s of silence
+ * 3. max: 5                   — Supabase free tier allows ~20 connections total;
+ *                                the backend uses some, so we cap the frontend low
+ * 4. idleTimeoutMillis: 10000 — release idle connections after 10s (instead of 30s)
+ *                                so Supabase doesn't kill them first
+ * 5. allowExitOnIdle: true    — lets the pool shrink to 0 when idle, preventing
+ *                                leaked connections on serverless cold starts
+ * 6. pool.on('error')         — catches unexpected disconnections so the pool
+ *                                doesn't crash the whole process
+ */
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    max: 5,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+    allowExitOnIdle: true,
     ssl: { rejectUnauthorized: false },
+    // TCP keepalive — prevents Supabase from killing idle connections
+    keepAlive: true,
+    keepAliveInitialDelayMs: 30_000,
+});
+
+// CRITICAL: Without this handler, a dropped connection causes an unhandled
+// error that crashes the Node.js process. With this handler, the pool
+// silently removes the dead connection and creates a fresh one on next query.
+pool.on("error", (err) => {
+    console.error("PostgreSQL pool: unexpected error on idle client", err.message);
+    // Don't exit — the pool will create a new connection on next query
 });
 
 /**
