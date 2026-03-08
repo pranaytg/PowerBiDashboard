@@ -26,7 +26,7 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false },
     // TCP keepalive — prevents Supabase from killing idle connections
     keepAlive: true,
-    keepAliveInitialDelayMs: 30_000,
+    keepAliveInitialDelayMillis: 30_000,
 });
 
 // CRITICAL: Without this handler, a dropped connection causes an unhandled
