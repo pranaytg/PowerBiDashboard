@@ -14,11 +14,13 @@ qna/
 │   ├── main.py                   # App entry, CORS, middleware, lifespan
 │   ├── config.py                 # Pydantic Settings (env vars)
 │   ├── database.py               # Supabase client singleton
+│   ├── cache.py                  # In-memory TTL cache (cachetools)
 │   ├── models.py                 # Pydantic response models
 │   ├── scheduler.py              # APScheduler: keep-alive ping + daily 7PM IST refresh
 │   ├── routers/
-│   │   ├── sales.py              # GET /api/v1/sales
-│   │   └── refresh.py            # POST /api/v1/refresh (SP-API → Supabase)
+│   │   ├── sales.py              # GET /api/v1/sales (cached)
+│   │   ├── refresh.py            # POST /api/v1/refresh (SP-API → Supabase, invalidates caches)
+│   │   └── sp_data.py            # Catalog, finances, returns (cached)
 │   └── services/
 │       ├── sp_api_service.py     # Amazon SP-API client (Orders API + Reports)
 │       ├── supabase_service.py   # Supabase CRUD operations
@@ -33,20 +35,26 @@ qna/
 │   │   │   ├── profitability/    # Order-level profitability table
 │   │   │   ├── shipments/        # Shipment cost tracking
 │   │   │   ├── inventory/        # AI inventory prediction (Holt-Winters)
-│   │   │   └── api/              # Next.js API routes (DB queries)
+│   │   │   └── api/              # Next.js API routes (DB queries, all cached)
 │   │   │       ├── auth/         # login, logout, me
-│   │   │       ├── sales/        # Sales data from Supabase
+│   │   │       ├── sales/        # Sales data — 60s cache
 │   │   │       ├── cogs/         # COGS CRUD
-│   │   │       ├── profitability/# Joined sales+cogs+shipments
+│   │   │       ├── profitability/# Joined sales+cogs+shipments — 120s cache
 │   │   │       ├── shipments/    # Shipment CRUD
-│   │   │       ├── inventory/    # Holt-Winters forecasting
-│   │   │       └── skus/         # Distinct SKU list
+│   │   │       ├── inventory/    # Holt-Winters forecasting — 300s cache
+│   │   │       ├── finances/     # Financial events — 120s cache
+│   │   │       ├── returns/      # Returns data — 120s cache
+│   │   │       └── skus/         # Distinct SKU list — 300s cache
 │   │   ├── lib/
 │   │   │   ├── db.ts             # PostgreSQL connection pool (pg)
+│   │   │   ├── cache.ts          # In-memory TTL cache for API routes
 │   │   │   └── calculations.ts   # COGS calculation logic
 │   │   └── components/
 │   │       └── Navbar.tsx        # Nav with logout button
 │   └── next.config.mjs          # output: "standalone"
+├── migrations/
+│   ├── 001_sp_api_features.sql   # financial_events + returns tables
+│   └── 002_performance_indexes.sql # All performance indexes
 ├── render.yaml                   # Render Blueprint (both services)
 ├── Dockerfile                    # Backend Docker image
 ├── Procfile                      # Gunicorn start command
@@ -64,10 +72,148 @@ qna/
 | Frontend | Next.js 16, React 19, Recharts |
 | Database | Supabase (PostgreSQL) |
 | Data Source | Amazon SP-API (Orders API) |
+| Caching (Backend) | cachetools (in-memory TTL + LRU) |
+| Caching (Frontend) | Custom in-memory TTL cache + HTTP Cache-Control |
 | Styling | Vanilla CSS (dark theme, glassmorphism) |
 | Scheduler | APScheduler (keep-alive + daily refresh) |
 | Auth | Cookie-based session (single admin) |
 | Deployment | Render (monorepo, 2 web services) |
+
+---
+
+## Performance Optimization
+
+This application implements a **multi-layer caching strategy** and **optimized database indexes** to ensure fast data access even with 30k+ records.
+
+### 🏗️ Database Indexes
+
+The main `sales_data` table (30k+ rows) is the most heavily queried table. Without indexes, every filter, sort, and count query performs a full sequential scan. Migration `002_performance_indexes.sql` adds **16 indexes** specifically chosen based on actual query patterns found in the codebase.
+
+#### Why Each Index Exists
+
+| Index | Column(s) | Query Pattern | Endpoint(s) |
+|-------|-----------|---------------|-------------|
+| `idx_sales_data_date` | `"Date"` | Date range filters (`>= / <=`) | Backend sales API, dashboard |
+| `idx_sales_data_year` | `"Year"` | Equality filter on year | Sales, inventory, profitability |
+| `idx_sales_data_channel` | `"Channel"` | Equality filter | Filter dropdowns, dashboard |
+| `idx_sales_data_business` | `"Business"` | B2B/B2C filter | Sales API, dashboard |
+| `idx_sales_data_brand` | `"BRAND"` | Equality filter | Sales, profitability |
+| `idx_sales_data_category` | `"Category"` | Equality filter | Filter dropdowns |
+| `idx_sales_data_txn_type` | `"Transaction Type"` | `!= 'return'` in **every** frontend query | All frontend API routes |
+| `idx_sales_data_source` | `"Source"` | Equality filter | Sales API |
+| `idx_sales_data_sku` | `"Sku"` | `ILIKE` search, `DISTINCT ON` | Profitability, inventory, SKUs |
+| `idx_sales_data_asin` | `"Asin"` | Equality filter, catalog join | Sales API, catalog sync |
+| `idx_sales_data_order_id` | `"Order Id"` | `ILIKE` search | Profitability, order lookup |
+| `idx_sales_data_ship_state` | `"Ship To State"` | State-wise grouping | Dashboard charts |
+| `idx_sales_data_txn_id_desc` | `"Transaction Type", id DESC` | **Hot path** — most queries filter by txn type + order by id DESC | All paginated endpoints |
+| `idx_sales_data_txn_date` | `"Transaction Type", "Date" DESC` | Txn type filter + date sort | Dashboard date filtering |
+| `idx_sales_data_txn_sku` | `"Transaction Type", "Sku"` | Txn type + SKU filter combo | Profitability, inventory |
+| `idx_sales_data_year_month` | `"Year", "Month_Num"` | Monthly aggregation | Inventory forecasting |
+
+**Supporting table indexes:**
+
+| Table | Index | Purpose |
+|-------|-------|---------|
+| `order_cogs_snapshot` | `idx_cogs_snapshot_order` | `WHERE order_id IN (...)` join in profitability |
+| `cogs` | `idx_cogs_sku` | SKU lookup for cost calculations |
+| `shipments` | `idx_shipments_order` | Order-level shipping cost join |
+| `financial_events` | `idx_financial_events_order/date/type` | Already existed in migration 001 |
+| `returns` | `idx_returns_order/date/sku` | Already existed in migration 001 |
+
+#### Composite Indexes — Why They Matter
+
+PostgreSQL can use a **composite index** to satisfy multi-column queries without scanning the table. The leading column in a composite index is critical:
+
+- **`idx_sales_data_txn_id_desc`** — Almost every frontend query starts with `WHERE "Transaction Type" != 'return'` and ends with `ORDER BY id DESC`. This composite index covers both the filter and the sort in a single B-tree traversal, eliminating the need for a separate sort step.
+- **`idx_sales_data_txn_date`** — The dashboard date-range queries always combine transaction type filtering with date ordering. This composite avoids a separate sort after filtering.
+- **`idx_sales_data_year_month`** — The inventory forecasting aggregates data by `(Year, Month_Num)`. A composite index turns this into an index-only scan.
+
+### 🧠 Backend Caching (FastAPI + cachetools)
+
+#### Why cachetools?
+
+We use Python's [`cachetools`](https://github.com/tkem/cachetools) library for in-memory caching:
+
+| Alternative | Why Not |
+|-------------|---------|
+| **Redis** | Requires an external service — adds cost on Render free tier, introduces network latency for cache reads, and adds operational complexity |
+| **Django cache framework** | Not applicable — this is FastAPI |
+| **functools.lru_cache** | No TTL support — cached data would never expire, causing stale reads after data refresh |
+| **Manual dict** | No thread safety, no automatic eviction, no TTL |
+
+**cachetools** provides:
+- **TTL-based expiration** — entries automatically expire, ensuring freshness
+- **LRU eviction** — bounded memory usage with `maxsize` per cache
+- **Thread-safe** — uses `threading.Lock` for safe access across Gunicorn workers
+- **Zero infrastructure** — runs in-process, no external dependencies
+
+#### Cache Configuration
+
+| Cache Name | Max Entries | TTL | What It Caches |
+|------------|-------------|-----|---------------|
+| `sales` | 256 | 5 min | Paginated sales queries (key = hash of all query params) |
+| `filters` | 32 | 10 min | Filter dropdown values (channels, brands, categories, etc.) |
+| `count` | 32 | 5 min | Record counts |
+| `catalog` | 8 | 15 min | Product catalog |
+| `finances` | 64 | 10 min | Financial events |
+| `returns` | 64 | 10 min | Returns data |
+| `summary` | 32 | 5 min | Sales summaries |
+
+#### Cache Invalidation Strategy
+
+Caches are invalidated **automatically** when new data arrives:
+
+1. **SP-API refresh completes** → `refresh.py` calls `invalidate_all()` → all caches are cleared
+2. **Manual invalidation** → `POST /cache/invalidate` endpoint clears all caches
+3. **TTL expiration** — even without explicit invalidation, entries expire naturally
+4. **Monitor** → `GET /cache/stats` returns current sizes, max sizes, and TTL for each cache
+
+### ⚡ Frontend Caching (Next.js API Routes)
+
+#### Why a Separate Frontend Cache?
+
+The Next.js frontend runs in a **separate Node.js process** from the FastAPI backend. Frontend API routes make direct PostgreSQL queries (not proxied through the backend), so they need their own cache layer.
+
+#### Implementation: `frontend/src/lib/cache.ts`
+
+- **In-memory Map** — simple, zero-dependency, runs in the Node.js process
+- **Per-entry TTL** — each entry has its own expiration timestamp
+- **Bounded size** (256 entries) — LRU-style eviction prevents unbounded memory growth
+- **Deterministic keys** — `makeCacheKey(prefix, URLSearchParams)` produces consistent keys
+
+#### Cache Configuration per Route
+
+| API Route | TTL | Rationale |
+|-----------|-----|-----------|
+| `/api/sales` | 60s | Frequently accessed, data changes daily |
+| `/api/profitability` | 120s | Expensive multi-table join + calculation |
+| `/api/inventory` | 300s | CPU-intensive Holt-Winters forecasting across all SKUs |
+| `/api/finances` | 120s | Moderate query complexity |
+| `/api/returns` | 120s | Moderate query complexity |
+| `/api/skus` | 300s | `DISTINCT ON` query, SKU list rarely changes |
+
+#### HTTP Cache-Control Headers
+
+Every cached response includes:
+```
+Cache-Control: public, s-maxage={ttl}, stale-while-revalidate=30
+CDN-Cache-Control: public, max-age={ttl}
+```
+
+- **`s-maxage`** — CDN/reverse-proxy cache duration (Render, Cloudflare, etc.)
+- **`stale-while-revalidate`** — serve stale data for 30s while refetching in the background
+- **`CDN-Cache-Control`** — respected by CDNs that support this header
+
+### 📊 Performance Impact Summary
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Sales list (30k rows, paginated) | Full table scan every request | Index scan + 60s cache |
+| Filter dropdowns | 7 × `DISTINCT` queries every page load | 10-min cached response |
+| Profitability page | 3 parallel queries + in-memory join, every time | Cached for 2 min |
+| Inventory forecasting | Full scan + Holt-Winters over all SKUs on every request | 5-min cached response |
+| Post-refresh staleness | N/A (no cache existed) | All caches auto-invalidated |
+| Cold database queries | Sequential scan on every column filter | B-tree index lookups |
 
 ---
 
@@ -118,7 +264,7 @@ npm install
 npm run dev
 ```
 
-- Backend: http://localhost:8000 (health: `/health`, docs: `/docs`)
+- Backend: http://localhost:8000 (health: `/health`, docs: `/docs`, cache stats: `/cache/stats`)
 - Frontend: http://localhost:3000 (login: `admin@jhhalte.com` / `JHHalte@2025`)
 
 ---
@@ -143,7 +289,8 @@ npm run dev
 2. Set `ALLOWED_ORIGINS` = frontend Render URL
 3. Set `NEXT_PUBLIC_API_URL` = backend Render URL on frontend
 4. Add all `ADMIN_*` env vars on frontend
-5. **Redeploy both** to pick up cross-references
+5. **Run migration** `002_performance_indexes.sql` in Supabase SQL Editor
+6. **Redeploy both** to pick up cross-references
 
 ### Keep-Alive
 - Built-in: APScheduler self-ping every 13 min
@@ -153,7 +300,7 @@ npm run dev
 
 ## Database Schema (Supabase)
 
-### `sales` table (main data, ~30k+ records)
+### `sales_data` table (main data, ~30k+ records)
 Populated by SP-API Orders API. Key columns:
 - `Order Id`, `SKU`, `ASIN`, `Item Description`
 - `Invoice Amount`, `Quantity`, `Purchase Date`
@@ -186,17 +333,6 @@ Populated by SP-API Orders API. Key columns:
 
 ### Current Permissions Required
 - `Inventory and Order Tracking` role
-
-### Pending Features (not yet implemented)
-1. **Returns/Refunds** — FBA Returns Reports API
-2. **Catalog Info** — Catalog Items API (product images, titles by ASIN)
-3. **Financial Data** — Finances API (fees, settlements, refunds)
-
-These would require:
-- New methods in `app/services/sp_api_service.py`
-- New Supabase tables
-- New backend router endpoints
-- New frontend pages/components
 
 ---
 
@@ -241,6 +377,8 @@ Logic in: `frontend/src/lib/calculations.ts`
 4. **Profitability** is computed by joining sales + cogs_config + shipments in SQL
 5. **No ORM** — raw SQL queries in frontend API routes for performance
 6. **Monorepo** — single GitHub repo, Render deploys with `rootDir` for frontend
+7. **Multi-layer caching** — backend (cachetools) + frontend (in-memory TTL) + HTTP headers
+8. **Automatic cache invalidation** — all caches cleared after SP-API data refresh
 
 ---
 
@@ -250,3 +388,4 @@ Logic in: `frontend/src/lib/calculations.ts`
 - Render free tier spins down after 15 min inactivity (self-ping mitigates)
 - Database values from Supabase can be `null` — always use `Number(val) || 0` in frontend
 - `DATABASE_URL` on Render must use Supabase **Connection Pooler** (IPv4) not direct (IPv6)
+- **Cache note**: Backend uses 2 Gunicorn workers — each worker has its own cache (no shared state). This is acceptable for this workload; for multi-instance deployments, consider Redis.

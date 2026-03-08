@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { cacheGet, cacheSet, makeCacheKey, getCacheHeaders } from "@/lib/cache";
 
 export const maxDuration = 60; // Allow 60s for massive aggregations
+
+const CACHE_TTL_MS = 120_000; // 2 minutes — expensive aggregation
 
 interface CogsRow {
     sku: string;
@@ -53,6 +56,13 @@ export async function GET(request: NextRequest) {
     const sku = searchParams.get("sku");
     const page = parseInt(searchParams.get("page") || "1");
     const perPage = parseInt(searchParams.get("per_page") || "50");
+
+    // Check cache
+    const cacheKey = makeCacheKey("profitability", searchParams);
+    const cached = cacheGet<object>(cacheKey);
+    if (cached) {
+        return NextResponse.json(cached, { headers: getCacheHeaders(120) });
+    }
 
     try {
         // 1. Fetch COGS data
@@ -261,14 +271,17 @@ export async function GET(request: NextRequest) {
             orders_without_cogs: results.filter((r) => !r.cogs_available).length,
         };
 
-        return NextResponse.json({
+        const response = {
             data: results,
             summary,
             total: count,
             page,
             per_page: perPage,
             total_pages: Math.ceil(count / perPage),
-        });
+        };
+
+        cacheSet(cacheKey, response, CACHE_TTL_MS);
+        return NextResponse.json(response, { headers: getCacheHeaders(120) });
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         const stack = err instanceof Error ? err.stack : undefined;

@@ -1,4 +1,4 @@
-"""SP-API data fetching endpoints for catalog, finances, and returns."""
+"""SP-API data fetching endpoints for catalog, finances, and returns — with caching."""
 
 import logging
 from datetime import datetime, timedelta
@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
+from app.cache import cache_get, cache_set, make_cache_key
 from app.database import get_supabase_client
 from app.services.supabase_service import SupabaseService
 from app.services.sp_api_service import SPAPIService, SPAPIAuthError
@@ -74,8 +75,15 @@ def sync_catalog(
 @router.get("/catalog")
 def get_catalog(service: SupabaseService = Depends(get_service)):
     """Get all product catalog entries."""
+    cache_key = make_cache_key("catalog_all")
+    cached = cache_get("catalog", cache_key)
+    if cached is not None:
+        return cached
+
     catalog = service.get_product_catalog()
-    return {"data": list(catalog.values()), "total": len(catalog)}
+    result = {"data": list(catalog.values()), "total": len(catalog)}
+    cache_set("catalog", cache_key, result)
+    return result
 
 
 # ------------------------------------------------------------------ #
@@ -144,6 +152,11 @@ def get_finances(
     per_page: int = Query(100, ge=1, le=5000),
 ):
     """Get financial events from DB."""
+    cache_key = make_cache_key("finances", page=page, per_page=per_page)
+    cached = cache_get("finances", cache_key)
+    if cached is not None:
+        return cached
+
     client = get_supabase_client()
     offset = (page - 1) * per_page
     result = (
@@ -154,12 +167,14 @@ def get_finances(
         .execute()
     )
     count_result = client.table("financial_events").select("*", count="exact").execute()
-    return {
+    response = {
         "data": result.data or [],
         "total": count_result.count or 0,
         "page": page,
         "per_page": per_page,
     }
+    cache_set("finances", cache_key, response)
+    return response
 
 
 # ------------------------------------------------------------------ #
@@ -225,6 +240,11 @@ def get_returns(
     per_page: int = Query(100, ge=1, le=5000),
 ):
     """Get returns from DB."""
+    cache_key = make_cache_key("returns", page=page, per_page=per_page)
+    cached = cache_get("returns", cache_key)
+    if cached is not None:
+        return cached
+
     client = get_supabase_client()
     offset = (page - 1) * per_page
     result = (
@@ -235,9 +255,11 @@ def get_returns(
         .execute()
     )
     count_result = client.table("returns").select("*", count="exact").execute()
-    return {
+    response = {
         "data": result.data or [],
         "total": count_result.count or 0,
         "page": page,
         "per_page": per_page,
     }
+    cache_set("returns", cache_key, response)
+    return response

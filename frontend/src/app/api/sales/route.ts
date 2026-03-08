@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query, queryWithCount } from "@/lib/db";
+import { queryWithCount } from "@/lib/db";
+import { cacheGet, cacheSet, makeCacheKey, getCacheHeaders } from "@/lib/cache";
+
+const CACHE_TTL_MS = 60_000; // 60 seconds
 
 // GET /api/sales — fetch sales_data with pagination and filters
 export async function GET(request: NextRequest) {
@@ -9,6 +12,13 @@ export async function GET(request: NextRequest) {
     const sku = searchParams.get("sku");
     const brand = searchParams.get("brand");
     const orderId = searchParams.get("order_id");
+
+    // Check cache
+    const cacheKey = makeCacheKey("sales", searchParams);
+    const cached = cacheGet<object>(cacheKey);
+    if (cached) {
+        return NextResponse.json(cached, { headers: getCacheHeaders(60) });
+    }
 
     const conditions: string[] = [`"Transaction Type" != 'return'`];
     const params: unknown[] = [];
@@ -38,13 +48,16 @@ export async function GET(request: NextRequest) {
             params
         );
 
-        return NextResponse.json({
+        const result = {
             data,
             total: count,
             page,
             per_page: perPage,
             total_pages: Math.ceil(count / perPage),
-        });
+        };
+
+        cacheSet(cacheKey, result, CACHE_TTL_MS);
+        return NextResponse.json(result, { headers: getCacheHeaders(60) });
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("Sales API Error:", message);

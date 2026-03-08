@@ -1,10 +1,11 @@
-"""Sales data API endpoints."""
+"""Sales data API endpoints with in-memory caching."""
 
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 
+from app.cache import cache_get, cache_set, make_cache_key
 from app.database import get_supabase_client
 from app.models import SalesResponse
 from app.services.supabase_service import SupabaseService
@@ -63,8 +64,14 @@ def get_sales(
     if order_id:
         filters["order_id"] = order_id
 
+    cache_key = make_cache_key("sales", page=page, per_page=per_page, **filters)
+    cached = cache_get("sales", cache_key)
+    if cached is not None:
+        return SalesResponse(**cached)
+
     try:
         result = service.get_sales(page=page, per_page=per_page, filters=filters or None)
+        cache_set("sales", cache_key, result)
         return SalesResponse(**result)
     except Exception as e:
         logger.error("Error fetching sales data: %s", e)
@@ -74,9 +81,16 @@ def get_sales(
 @router.get("/count")
 def get_sales_count(service: SupabaseService = Depends(get_service)):
     """Get total number of sales records."""
+    cache_key = make_cache_key("sales_count")
+    cached = cache_get("count", cache_key)
+    if cached is not None:
+        return cached
+
     try:
         count = service.get_sales_count()
-        return {"total": count}
+        result = {"total": count}
+        cache_set("count", cache_key, result)
+        return result
     except Exception as e:
         logger.error("Error getting sales count: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -88,8 +102,13 @@ def get_available_filters(service: SupabaseService = Depends(get_service)):
     
     Returns distinct values for key columns to populate filter dropdowns.
     """
+    cache_key = make_cache_key("all_filters")
+    cached = cache_get("filters", cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        return {
+        result = {
             "channels": service.get_distinct_values("Channel"),
             "businesses": service.get_distinct_values("Business"),
             "brands": service.get_distinct_values("BRAND"),
@@ -98,6 +117,8 @@ def get_available_filters(service: SupabaseService = Depends(get_service)):
             "sources": service.get_distinct_values("Source"),
             "years": service.get_distinct_values("Year"),
         }
+        cache_set("filters", cache_key, result)
+        return result
     except Exception as e:
         logger.error("Error getting filter values: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -110,6 +131,11 @@ def get_sales_summary(
     service: SupabaseService = Depends(get_service),
 ):
     """Get a summary of sales data (total records, date range, etc.)."""
+    cache_key = make_cache_key("summary", year=year, channel=channel)
+    cached = cache_get("summary", cache_key)
+    if cached is not None:
+        return cached
+
     try:
         filters = {}
         if year:
@@ -120,10 +146,12 @@ def get_sales_summary(
         result = service.get_sales(page=1, per_page=1, filters=filters or None)
         total = result["total"]
 
-        return {
+        response = {
             "total_records": total,
             "filters_applied": filters,
         }
+        cache_set("summary", cache_key, response)
+        return response
     except Exception as e:
         logger.error("Error getting sales summary: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

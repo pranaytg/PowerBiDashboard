@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
+from app.cache import invalidate_all as invalidate_all_caches
 from app.database import get_supabase_client
 from app.models import RefreshRequest, RefreshStatusResponse, RefreshHistoryResponse
 from app.services.supabase_service import SupabaseService
@@ -120,6 +121,9 @@ def _run_refresh(
             total_inserted,
             error_msg,
         )
+
+        # Invalidate all caches so fresh data is served
+        invalidate_all_caches()
 
     except Exception as e:
         logger.error("Refresh failed: %s", e)

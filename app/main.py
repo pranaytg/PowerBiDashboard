@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.database import get_supabase_client
 from app.scheduler import start_scheduler, stop_scheduler
 from app.models import HealthResponse
+from app.cache import get_cache_stats, invalidate_all as invalidate_all_caches
 from app.routers import sales, refresh, sp_data
 from app.services.supabase_service import SupabaseService
 
@@ -166,6 +167,21 @@ def health_check():
         last_refresh=last_refresh,
         total_records=total_records,
     )
+
+
+# ---- Cache Management ----
+
+@app.get("/cache/stats", tags=["Cache"])
+def cache_stats():
+    """Get current cache statistics."""
+    return get_cache_stats()
+
+
+@app.post("/cache/invalidate", tags=["Cache"])
+def cache_invalidate():
+    """Manually invalidate all caches."""
+    result = invalidate_all_caches()
+    return {"status": "invalidated", "cleared": result}
 
 
 # ---- Run directly ----

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { cacheGet, cacheSet, getCacheHeaders } from "@/lib/cache";
 
 export const maxDuration = 60; // Allow 60s for forecasting 30k datasets
+
+const CACHE_TTL_MS = 300_000; // 5 minutes — CPU-intensive forecasting
+const CACHE_KEY = "inventory_forecast";
 
 // Configuration for Holt-Winters algorithm
 const ALPHA = 0.4; // Level smoothing
@@ -61,6 +65,12 @@ interface SalesRow {
 }
 
 export async function GET(request: NextRequest) {
+    // Check cache — inventory forecast is CPU-heavy
+    const cached = cacheGet<object>(CACHE_KEY);
+    if (cached) {
+        return NextResponse.json(cached, { headers: getCacheHeaders(300) });
+    }
+
     try {
         // 1. Fetch ALL required sales data
         const { rows: allSalesData } = await query<SalesRow>(
@@ -158,11 +168,14 @@ export async function GET(request: NextRequest) {
             return b.projection_12m_total - a.projection_12m_total;
         });
 
-        return NextResponse.json({
+        const response = {
             historical_timeline: globalTimeline.slice(-12),
             projection_timeline: projectionTimeline,
             data: inventoryAnalysis
-        });
+        };
+
+        cacheSet(CACHE_KEY, response, CACHE_TTL_MS);
+        return NextResponse.json(response, { headers: getCacheHeaders(300) });
 
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
