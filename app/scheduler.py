@@ -48,6 +48,17 @@ def _daily_refresh():
         logger.error("Daily refresh trigger failed: %s", e)
 
 
+def _daily_inventory_snapshot():
+    """Trigger a daily FBA inventory snapshot."""
+    settings = get_settings()
+    url = f"{settings.self_base_url}/api/v1/inventory/sync"
+    try:
+        r = httpx.post(url, timeout=30.0)
+        logger.info("Inventory snapshot triggered → status %d, body: %s", r.status_code, r.text[:200])
+    except Exception as e:
+        logger.error("Inventory snapshot trigger failed: %s", e)
+
+
 def start_scheduler():
     """Start the background scheduler with keep-alive and daily refresh jobs."""
     global _scheduler
@@ -75,9 +86,19 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # Job 3: Daily inventory snapshot (30 min after order refresh)
+    _scheduler.add_job(
+        _daily_inventory_snapshot,
+        trigger=CronTrigger(hour=settings.refresh_hour_ist, minute=30, timezone=IST),
+        id="daily_inventory_snapshot",
+        name="Daily FBA inventory snapshot",
+        replace_existing=True,
+    )
+
     _scheduler.start()
     logger.info(
-        "Scheduler started: keep-alive every 13 min, daily refresh at %02d:00 IST",
+        "Scheduler started: keep-alive every 13 min, daily refresh at %02d:00 IST, inventory snapshot at %02d:30 IST",
+        settings.refresh_hour_ist,
         settings.refresh_hour_ist,
     )
 

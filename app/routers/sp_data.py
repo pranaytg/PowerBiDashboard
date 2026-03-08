@@ -263,3 +263,78 @@ def get_returns(
     }
     cache_set("returns", cache_key, response)
     return response
+
+
+# ------------------------------------------------------------------ #
+#  Inventory Snapshots  – daily FBA stock levels
+# ------------------------------------------------------------------ #
+
+@router.post("/inventory/sync")
+def sync_inventory(
+    background_tasks: BackgroundTasks,
+    sp_api: SPAPIService = Depends(get_sp_api),
+):
+    """Fetch current FBA inventory levels and store as a daily snapshot."""
+    if not sp_api.is_configured:
+        raise HTTPException(status_code=400, detail="SP-API not configured")
+
+    def _run():
+        try:
+            inventory_rows = sp_api.fetch_inventory_report()
+            client = get_supabase_client()
+            today = datetime.utcnow().strftime("%Y-%m-%d")
+
+            batch = []
+            for row in inventory_rows:
+                record = {
+                    "snapshot_date": today,
+                    "sku": row["sku"],
+                    "fnsku": row.get("fnsku", ""),
+                    "asin": row.get("asin", ""),
+                    "product_name": row.get("product_name", ""),
+                    "fulfillable_quantity": row.get("fulfillable_quantity", 0),
+                    "inbound_quantity": row.get("inbound_quantity", 0),
+                    "reserved_quantity": row.get("reserved_quantity", 0),
+                    "unfulfillable_quantity": row.get("unfulfillable_quantity", 0),
+                    "total_quantity": row.get("total_quantity", 0),
+                }
+                batch.append(record)
+
+            if batch:
+                for i in range(0, len(batch), 500):
+                    chunk = batch[i:i + 500]
+                    client.table("inventory_snapshots").upsert(
+                        chunk, on_conflict="snapshot_date,sku"
+                    ).execute()
+
+            logger.info("Saved inventory snapshot: %d SKUs for %s", len(batch), today)
+        except Exception as e:
+            logger.error("Inventory sync failed: %s", e)
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "Inventory snapshot sync started"}
+
+
+@router.get("/inventory/snapshots")
+def get_inventory_snapshots(
+    sku: Optional[str] = Query(None),
+    days: int = Query(90, ge=1, le=365),
+):
+    """Get inventory snapshot history (for charts and analysis)."""
+    cache_key = make_cache_key("inv_snapshots", sku=sku, days=days)
+    cached = cache_get("catalog", cache_key)  # reuse catalog cache slot
+    if cached is not None:
+        return cached
+
+    client = get_supabase_client()
+    q = client.table("inventory_snapshots").select("*").order("snapshot_date", desc=True)
+
+    if sku:
+        q = q.eq("sku", sku)
+
+    q = q.limit(days * 100)  # reasonable upper bound
+    result = q.execute()
+
+    response = {"data": result.data or [], "total": len(result.data or [])}
+    cache_set("catalog", cache_key, response)
+    return response

@@ -540,3 +540,93 @@ class SPAPIService:
             logger.error("Returns report fetch failed: %s", e)
             raise
 
+    # ------------------------------------------------------------------ #
+    #  FBA Inventory Report  (daily stock snapshot)
+    # ------------------------------------------------------------------ #
+
+    def fetch_inventory_report(self) -> list[dict]:
+        """Fetch current FBA inventory levels via the Reports API.
+
+        Uses GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA report type.
+        This is a tab-delimited flat file containing current FBA stock
+        levels per SKU including fulfillable, inbound, reserved, and
+        unfulfillable quantities.
+
+        Returns:
+            List of inventory row dicts, one per SKU/FNSKU.
+        """
+        if not self.is_configured:
+            raise SPAPIAuthError(
+                "SP-API credentials not configured. "
+                "Please set SP_API_REFRESH_TOKEN, SP_API_LWA_APP_ID, "
+                "and SP_API_LWA_CLIENT_SECRET in .env"
+            )
+
+        report_type = "GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA"
+        marketplace = self.settings.sp_api_marketplace_id
+
+        # This report doesn't use date range — it returns current snapshot
+        body = {
+            "reportType": report_type,
+            "marketplaceIds": [marketplace],
+        }
+
+        try:
+            # Create the report
+            result = self._make_request("POST", "/reports/2021-06-30/reports", json=body)
+            report_id = result.get("reportId")
+            logger.info("Created inventory report %s", report_id)
+
+            # Wait for it to complete
+            doc_id = self.wait_for_report(report_id)
+
+            # Download and parse
+            raw_rows = self.download_report(doc_id)
+
+            # Normalize the column names (they vary slightly)
+            inventory_rows = []
+            for row in raw_rows:
+                inv = {
+                    "sku": row.get("sku", row.get("seller-sku", "")),
+                    "fnsku": row.get("fnsku", ""),
+                    "asin": row.get("asin", ""),
+                    "product_name": row.get("product-name", row.get("product_name", "")),
+                    "fulfillable_quantity": self._safe_int(
+                        row.get("afn-fulfillable-quantity", row.get("Fulfillable Quantity", 0))
+                    ),
+                    "inbound_quantity": (
+                        self._safe_int(row.get("afn-inbound-working-quantity", 0))
+                        + self._safe_int(row.get("afn-inbound-shipped-quantity", 0))
+                        + self._safe_int(row.get("afn-inbound-receiving-quantity", 0))
+                    ),
+                    "reserved_quantity": self._safe_int(
+                        row.get("afn-reserved-quantity", row.get("Reserved Quantity", 0))
+                    ),
+                    "unfulfillable_quantity": self._safe_int(
+                        row.get("afn-unsellable-quantity", row.get("Unfulfillable Quantity", 0))
+                    ),
+                }
+                inv["total_quantity"] = (
+                    inv["fulfillable_quantity"]
+                    + inv["inbound_quantity"]
+                    + inv["reserved_quantity"]
+                    + inv["unfulfillable_quantity"]
+                )
+                if inv["sku"]:  # skip rows without SKU
+                    inventory_rows.append(inv)
+
+            logger.info("Fetched inventory snapshot: %d SKUs", len(inventory_rows))
+            return inventory_rows
+
+        except Exception as e:
+            logger.error("Inventory report fetch failed: %s", e)
+            raise
+
+    @staticmethod
+    def _safe_int(value) -> int:
+        """Safely convert a value to int, defaulting to 0."""
+        try:
+            return int(value or 0)
+        except (ValueError, TypeError):
+            return 0
+
