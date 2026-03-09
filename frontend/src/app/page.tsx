@@ -48,6 +48,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<ProfitRow[]>([]);
   const [totalSales, setTotalSales] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
 
@@ -66,10 +67,19 @@ export default function DashboardPage() {
         ]);
         const profData = await profRes.json();
         const salesData = await salesRes.json();
-        setData(profData.data || []);
-        setTotalSales(salesData.total || 0);
+
+        if (profData.error) {
+          setErrorMsg(profData.error);
+          setData([]);
+          setTotalSales(0);
+        } else {
+          setData(profData.data || []);
+          setTotalSales(salesData.total || 0);
+          setErrorMsg(null);
+        }
       } catch (e) {
         console.error("Dashboard load error:", e);
+        setErrorMsg(e instanceof Error ? e.message : "Failed to load dashboard data");
       }
       setLoading(false);
     }
@@ -252,6 +262,23 @@ export default function DashboardPage() {
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: "1rem" }}>
       <div className="spinner" style={{ width: 40, height: 40 }} />
       <p style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>Loading analytics...</p>
+    </div>
+  );
+
+  if (errorMsg) return (
+    <div style={{ padding: "3rem", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", textAlign: "center" }}>
+      <div style={{ background: "rgba(244, 63, 94, 0.1)", color: "var(--accent-rose)", padding: "1.5rem 2rem", borderRadius: "12px", border: "1px solid rgba(244, 63, 94, 0.2)", maxWidth: "500px" }}>
+        <h2 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: "0.5rem" }}>⚠️ Failed to load data</h2>
+        <p style={{ fontSize: "0.875rem", marginBottom: "1rem", lineHeight: 1.5 }}>
+          The dashboard could not load data from the server. This is usually caused by database connection issues.
+        </p>
+        <code style={{ display: "block", background: "rgba(0,0,0,0.3)", padding: "0.75rem", borderRadius: "6px", fontSize: "0.75rem", textAlign: "left", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+          {errorMsg}
+        </code>
+        <button className="btn-primary" style={{ marginTop: "1.5rem" }} onClick={() => window.location.reload()}>
+          Try Again
+        </button>
+      </div>
     </div>
   );
 

@@ -17,7 +17,7 @@ import { Pool, QueryResult, QueryResultRow } from "pg";
  * 6. pool.on('error')         — catches unexpected disconnections so the pool
  *                                doesn't crash the whole process
  */
-const pool = new Pool({
+const poolOptions = {
     connectionString: process.env.DATABASE_URL,
     max: 5,
     idleTimeoutMillis: 10_000,
@@ -27,7 +27,17 @@ const pool = new Pool({
     // TCP keepalive — prevents Supabase from killing idle connections
     keepAlive: true,
     keepAliveInitialDelayMillis: 30_000,
-});
+};
+
+// Global singleton to prevent Next.js HMR from aggressively creating new connection pools
+// which exhausts Supabase's max connections leading to 0s returning on the dashboard.
+const globalForPg = global as unknown as { pgPool: Pool };
+
+export const pool = globalForPg.pgPool || new Pool(poolOptions);
+
+if (process.env.NODE_ENV !== "production") {
+    globalForPg.pgPool = pool;
+}
 
 // CRITICAL: Without this handler, a dropped connection causes an unhandled
 // error that crashes the Node.js process. With this handler, the pool
