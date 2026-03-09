@@ -23,10 +23,12 @@ export async function POST(request: NextRequest) {
         }
 
         const { rows } = await query(
-            `INSERT INTO cogs (sku, product_name, import_price, currency, exchange_rate, custom_duty_pct, gst1_pct, shipping_cost, margin1_pct, marketing_cost, margin2_pct, gst2_pct)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            `INSERT INTO cogs (sku, product_name, article_number, platform_fee_pct, import_price, currency, exchange_rate, custom_duty_pct, gst1_pct, shipping_cost, margin1_pct, marketing_cost, margin2_pct, gst2_pct)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              ON CONFLICT (sku) DO UPDATE SET
                 product_name = EXCLUDED.product_name,
+                article_number = EXCLUDED.article_number,
+                platform_fee_pct = EXCLUDED.platform_fee_pct,
                 import_price = EXCLUDED.import_price,
                 currency = EXCLUDED.currency,
                 exchange_rate = EXCLUDED.exchange_rate,
@@ -41,6 +43,8 @@ export async function POST(request: NextRequest) {
             [
                 body.sku.toLowerCase().trim(),
                 body.product_name || null,
+                body.article_number || null,
+                body.platform_fee_pct ?? 15.0,
                 body.import_price || 0,
                 body.currency || "USD",
                 body.exchange_rate || 1,

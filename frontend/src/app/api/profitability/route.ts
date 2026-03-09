@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { cacheGet, cacheSet, makeCacheKey, getCacheHeaders } from "@/lib/cache";
+import { calculateProfitability } from "@/lib/calculations";
 
 export const maxDuration = 60; // Allow 60s for massive aggregations
 
@@ -20,6 +21,8 @@ interface CogsRow {
     marketing_cost: string;
     margin2_amt: string;
     gst2_amt: string;
+    platform_fee_pct?: string;
+    gst2_pct?: string;
 }
 
 interface ShipRow {
@@ -83,6 +86,8 @@ export async function GET(request: NextRequest) {
                 marketing_cost: parseFloat(c.marketing_cost) || 0,
                 margin2_amt: parseFloat(c.margin2_amt) || 0,
                 gst2_amt: parseFloat(c.gst2_amt) || 0,
+                platform_fee_pct: parseFloat(c.platform_fee_pct || "15"),
+                gst2_pct: parseFloat(c.gst2_pct || "18"),
             };
         }
 
@@ -207,28 +212,35 @@ export async function GET(request: NextRequest) {
                     halte_margin_pct: 0,
                     total_profit: 0,
                     total_margin_pct: 0,
+                    amazon_fee_amt: 0,
                     import_price_inr: 0, custom_duty_amt: 0, gst1_amt: 0, cogs_shipping: 0,
                     margin1_amt: 0, marketing_cost: 0, margin2_amt: 0, gst2_amt: 0, msp: 0,
                 };
             }
 
-            const totalCogs = halteCost * qty;
-            const jhProfit = (halteCost - landedCost) * qty;
-            const jhRevenue = halteCost * qty;
-            const halteProfit = invoiceAmt - totalCogs - shipCost;
+            const prof = calculateProfitability({
+                invoice_amount: invoiceAmt,
+                quantity: qty,
+                halte_cost_price: halteCost,
+                landed_cost: landedCost,
+                shipment_cost: shipCost,
+                platform_fee_pct: cogs?.platform_fee_pct ?? 15,
+                gst2_pct: cogs?.gst2_pct ?? 18,
+            });
 
             return {
                 ...baseOutput,
                 cogs_available: true,
                 landed_cost_unit: round2(landedCost),
                 halte_cost_price_unit: round2(halteCost),
-                total_cogs: round2(totalCogs),
-                jh_profit: round2(jhProfit),
-                jh_margin_pct: jhRevenue > 0 ? round2((jhProfit / jhRevenue) * 100) : 0,
-                halte_profit: round2(halteProfit),
-                halte_margin_pct: invoiceAmt > 0 ? round2((halteProfit / invoiceAmt) * 100) : 0,
-                total_profit: round2(jhProfit + halteProfit),
-                total_margin_pct: invoiceAmt > 0 ? round2(((jhProfit + halteProfit) / invoiceAmt) * 100) : 0,
+                total_cogs: prof.total_cogs,
+                jh_profit: prof.jh_profit,
+                jh_margin_pct: prof.jh_margin_pct,
+                halte_profit: prof.halte_profit,
+                halte_margin_pct: prof.halte_margin_pct,
+                total_profit: prof.total_profit,
+                total_margin_pct: prof.total_margin_pct,
+                amazon_fee_amt: prof.amazon_fee_amt,
                 import_price_inr: cogs ? round2(cogs.import_price_inr) : 0,
                 custom_duty_amt: cogs ? round2(cogs.custom_duty_amt) : 0,
                 gst1_amt: cogs ? round2(cogs.gst1_amt) : 0,
@@ -264,6 +276,7 @@ export async function GET(request: NextRequest) {
             total_revenue: round2(results.reduce((s, r) => s + r.invoice_amount, 0)),
             total_cogs: round2(results.reduce((s, r) => s + r.total_cogs, 0)),
             total_shipping: round2(results.reduce((s, r) => s + r.shipment_cost, 0)),
+            total_amazon_fees: round2(results.reduce((s, r) => s + (r.amazon_fee_amt || 0), 0)),
             total_jh_profit: round2(results.reduce((s, r) => s + r.jh_profit, 0)),
             total_halte_profit: round2(results.reduce((s, r) => s + r.halte_profit, 0)),
             total_profit: round2(results.reduce((s, r) => s + r.total_profit, 0)),

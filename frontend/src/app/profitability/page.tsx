@@ -15,6 +15,7 @@ interface ProfitRow {
     landed_cost_unit: number;
     halte_cost_price_unit: number;
     total_cogs: number;
+    amazon_fee_amt: number;
     jh_profit: number;
     jh_margin_pct: number;
     halte_profit: number;
@@ -36,6 +37,7 @@ interface Summary {
     total_revenue: number;
     total_cogs: number;
     total_shipping: number;
+    total_amazon_fees: number;
     total_jh_profit: number;
     total_halte_profit: number;
     total_profit: number;
@@ -84,7 +86,7 @@ export default function ProfitabilityPage() {
 
     // SKU aggregation
     const skuAgg = (() => {
-        const map = new Map<string, { sku: string; brand: string; product: string; qty: number; revenue: number; cogs: number; shipping: number; jhProfit: number; halteProfit: number; totalProfit: number; orders: number }>();
+        const map = new Map<string, { sku: string; brand: string; product: string; qty: number; revenue: number; cogs: number; shipping: number; amazonFees: number; jhProfit: number; halteProfit: number; totalProfit: number; orders: number }>();
         for (const r of rows) {
             if (!r.cogs_available) continue;
             const existing = map.get(r.sku);
@@ -93,6 +95,7 @@ export default function ProfitabilityPage() {
                 existing.revenue += r.invoice_amount;
                 existing.cogs += r.total_cogs;
                 existing.shipping += r.shipment_cost;
+                existing.amazonFees += (r.amazon_fee_amt || 0);
                 existing.jhProfit += r.jh_profit;
                 existing.halteProfit += r.halte_profit;
                 existing.totalProfit += r.total_profit;
@@ -106,6 +109,7 @@ export default function ProfitabilityPage() {
                     revenue: r.invoice_amount,
                     cogs: r.total_cogs,
                     shipping: r.shipment_cost,
+                    amazonFees: r.amazon_fee_amt || 0,
                     jhProfit: r.jh_profit,
                     halteProfit: r.halte_profit,
                     totalProfit: r.total_profit,
@@ -135,6 +139,7 @@ export default function ProfitabilityPage() {
                         { label: "Revenue", value: summary.total_revenue, color: "var(--accent-indigo)", icon: "💰" },
                         { label: "COGS", value: summary.total_cogs, color: "var(--accent-amber)", icon: "📦" },
                         { label: "Shipping", value: summary.total_shipping, color: "var(--accent-rose)", icon: "🚚" },
+                        { label: "Amazon Fees", value: summary.total_amazon_fees, color: "var(--accent-orange)", icon: "🏷️" },
                         { label: "JH Profit", value: summary.total_jh_profit, color: "var(--accent-emerald)", icon: "🏢" },
                         { label: "Halte Profit", value: summary.total_halte_profit, color: "var(--accent-sky)", icon: "🛒" },
                         { label: "Total Profit", value: summary.total_profit, color: summary.total_profit >= 0 ? "var(--accent-emerald)" : "var(--accent-rose)", icon: "📈" },
@@ -186,6 +191,7 @@ export default function ProfitabilityPage() {
                                 <th>Qty</th>
                                 <th>Revenue</th>
                                 <th>COGS</th>
+                                <th>Amazon Fees</th>
                                 <th>Shipping</th>
                                 <th>JH Profit</th>
                                 <th>Halte Profit</th>
@@ -213,6 +219,7 @@ export default function ProfitabilityPage() {
                                         <td>{r.quantity}</td>
                                         <td style={{ fontWeight: 600 }}>{formatINR(r.invoice_amount)}</td>
                                         <td>{r.cogs_available ? formatINR(r.total_cogs) : <span className="badge badge-warning">No COGS</span>}</td>
+                                        <td>{r.amazon_fee_amt ? formatINR(r.amazon_fee_amt) : "—"}</td>
                                         <td>{formatINR(r.shipment_cost)}</td>
                                         <td className={r.jh_profit >= 0 ? "profit-positive" : "profit-negative"}>{formatINR(r.jh_profit)}</td>
                                         <td className={r.halte_profit >= 0 ? "profit-positive" : "profit-negative"}>{formatINR(r.halte_profit)}</td>
@@ -251,6 +258,7 @@ export default function ProfitabilityPage() {
                                                         {[
                                                             { label: `Revenue (Invoice)`, value: r.invoice_amount },
                                                             { label: `COGS (${r.halte_cost_price_unit} × ${r.quantity})`, value: -r.total_cogs },
+                                                            { label: "Amazon Referral Fee", value: -r.amazon_fee_amt },
                                                             { label: "Order Shipping", value: -r.shipment_cost },
                                                             { label: "= Halte Profit", value: r.halte_profit, bold: true, color: r.halte_profit >= 0 },
                                                             { label: `JH Profit (margin on ${r.quantity} units)`, value: r.jh_profit, bold: true, color: r.jh_profit >= 0 },
@@ -285,6 +293,7 @@ export default function ProfitabilityPage() {
                                 <th>Qty</th>
                                 <th>Revenue</th>
                                 <th>COGS</th>
+                                <th>Amazon Fees</th>
                                 <th>Shipping</th>
                                 <th>JH Profit</th>
                                 <th>Halte Profit</th>
@@ -303,6 +312,7 @@ export default function ProfitabilityPage() {
                                     <td>{r.qty}</td>
                                     <td style={{ fontWeight: 600 }}>{formatINR(r.revenue)}</td>
                                     <td>{formatINR(r.cogs)}</td>
+                                    <td>{formatINR(r.amazonFees)}</td>
                                     <td>{formatINR(r.shipping)}</td>
                                     <td className={r.jhProfit >= 0 ? "profit-positive" : "profit-negative"}>{formatINR(r.jhProfit)}</td>
                                     <td className={r.halteProfit >= 0 ? "profit-positive" : "profit-negative"}>{formatINR(r.halteProfit)}</td>

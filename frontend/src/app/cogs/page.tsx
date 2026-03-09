@@ -7,6 +7,8 @@ interface CogsRecord {
     id?: number;
     sku: string;
     product_name: string;
+    article_number?: string;
+    platform_fee_pct: number;
     import_price: number;
     currency: "USD" | "EUR" | "INR";
     exchange_rate: number;
@@ -45,6 +47,8 @@ interface Toast {
 const emptyRecord = (): CogsRecord => ({
     sku: "",
     product_name: "",
+    article_number: "",
+    platform_fee_pct: 15,
     import_price: 0,
     currency: "USD",
     exchange_rate: 83.5,
@@ -168,6 +172,7 @@ export default function CogsPage() {
             marketing_cost: Number(record.marketing_cost) || 0,
             margin2_pct: Number(record.margin2_pct) || 0,
             gst2_pct: Number(record.gst2_pct) || 0,
+            platform_fee_pct: Number(record.platform_fee_pct) || 0,
         };
         return calculateCogs(input);
     }
@@ -236,6 +241,7 @@ export default function CogsPage() {
                         <tr>
                             <th>SKU</th>
                             <th>Product</th>
+                            <th>Article #</th>
                             <th>Import Price</th>
                             <th>Currency</th>
                             <th>Rate</th>
@@ -250,6 +256,8 @@ export default function CogsPage() {
                             <th>Selling Price</th>
                             <th>GST2 %</th>
                             <th>MSP</th>
+                            <th>Plat. Fee %</th>
+                            <th>Rec. Price</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -270,6 +278,7 @@ export default function CogsPage() {
                                         <tr key={`tr-${r.sku}`}>
                                             <td style={{ fontWeight: 600, fontFamily: "monospace", fontSize: "0.75rem" }}>{r.sku}</td>
                                             <td style={{ maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.product_name || "—"}</td>
+                                            <td style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>{r.article_number || "—"}</td>
                                             <td>{(Number(r.import_price) || 0).toFixed(2)}</td>
                                             <td><span className="badge badge-success">{r.currency}</span></td>
                                             <td>{Number(r.exchange_rate) || 0}</td>
@@ -284,6 +293,8 @@ export default function CogsPage() {
                                             <td style={{ fontWeight: 600, color: "var(--accent-indigo-light)" }}>₹{bd.selling_price.toFixed(2)}</td>
                                             <td>{Number(r.gst2_pct) || 0}%</td>
                                             <td style={{ fontWeight: 700, color: "var(--accent-emerald)" }}>₹{bd.msp.toFixed(2)}</td>
+                                            <td>{Number(r.platform_fee_pct) || 0}%</td>
+                                            <td style={{ fontWeight: 700, color: "var(--accent-indigo)" }}>₹{bd.recommended_price.toFixed(2)}</td>
                                             <td>
                                                 <div style={{ display: "flex", gap: "0.375rem" }}>
                                                     <button className="btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem" }} onClick={() => setExpandedSku(expandedSku === r.sku ? null : r.sku)}>
@@ -375,6 +386,7 @@ function CalculationBreakdown({ record, breakdown }: { record: CogsRecord; break
         { label: "10. Selling Price", formula: "Halte Cost + Marketing + M2", value: breakdown.selling_price, highlight: "indigo" },
         { label: "11. GST on Selling", formula: `${breakdown.selling_price} × ${record.gst2_pct}%`, value: breakdown.gst2_amt },
         { label: "12. MSP (Min. Selling Price)", formula: "Selling Price + GST2", value: breakdown.msp, highlight: "emerald" },
+        { label: "13. Recommended Price", formula: `Target Price to get M2 margin after ${record.platform_fee_pct}% Platform Fee + GST`, value: breakdown.recommended_price, highlight: "indigo" },
     ];
 
     return (
@@ -426,6 +438,7 @@ function CogsFormModal({
         marketing_cost: form.marketing_cost,
         margin2_pct: form.margin2_pct,
         gst2_pct: form.gst2_pct,
+        platform_fee_pct: form.platform_fee_pct,
     });
 
     function setField(field: keyof CogsRecord, value: string | number) {
@@ -482,9 +495,15 @@ function CogsFormModal({
                             )}
                         </div>
 
-                        <div>
-                            <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.25rem", display: "block" }}>Product Name</label>
-                            <input className="input-field" value={form.product_name} onChange={(e) => setField("product_name", e.target.value)} />
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                            <div>
+                                <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.25rem", display: "block" }}>Product Name</label>
+                                <input className="input-field" value={form.product_name || ""} onChange={(e) => setField("product_name", e.target.value)} />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.25rem", display: "block" }}>Article Number</label>
+                                <input className="input-field" value={form.article_number || ""} onChange={(e) => setField("article_number", e.target.value)} />
+                            </div>
                         </div>
 
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem" }}>
@@ -532,10 +551,14 @@ function CogsFormModal({
                             <input className="input-field" type="number" step="0.01" value={form.marketing_cost} onChange={(e) => setField("marketing_cost", parseFloat(e.target.value) || 0)} />
                         </div>
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem" }}>
                             <div>
                                 <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.25rem", display: "block" }}>Halte Margin (M2) %</label>
                                 <input className="input-field" type="number" step="0.1" value={form.margin2_pct} onChange={(e) => setField("margin2_pct", parseFloat(e.target.value) || 0)} />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.25rem", display: "block" }}>Platform Fee %</label>
+                                <input className="input-field" type="number" step="0.1" value={form.platform_fee_pct} onChange={(e) => setField("platform_fee_pct", parseFloat(e.target.value) || 0)} />
                             </div>
                             <div>
                                 <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.25rem", display: "block" }}>GST on Selling %</label>
