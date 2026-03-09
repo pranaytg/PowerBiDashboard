@@ -10,6 +10,7 @@ import {
 interface ProfitRow {
   order_id: string;
   sku: string;
+  date: string;
   state: string;
   month: string;
   month_num: number;
@@ -53,6 +54,7 @@ export default function DashboardPage() {
   const [syncMsg, setSyncMsg] = useState("");
 
   // Filters
+  const [timeframe, setTimeframe] = useState<string>("All Time");
   const [selectedYear, setSelectedYear] = useState<string>("All");
   const [selectedMonth, setSelectedMonth] = useState<string>("All");
   const [selectedSku, setSelectedSku] = useState<string>("All");
@@ -109,14 +111,37 @@ export default function DashboardPage() {
 
   // Apply filters
   const filtered = useMemo(() => {
+    // Current date calculations for relative filters
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(today.getDate() - 7);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
     return data.filter((r) => {
       if (selectedYear !== "All" && r.year !== Number(selectedYear)) return false;
       if (selectedMonth !== "All" && r.month !== selectedMonth) return false;
       if (selectedSku !== "All" && r.sku !== selectedSku) return false;
+
+      // Timeframe logic
+      if (timeframe !== "All Time" && r.date) {
+        // Amazon dates can have time components, taking only YYYY-MM-DD ensures accurate midnight comparisons
+        const rowDate = new Date(r.date.split("T")[0]);
+        rowDate.setHours(0, 0, 0, 0);
+
+        if (timeframe === "Today" && rowDate.getTime() !== today.getTime()) return false;
+        if (timeframe === "Yesterday" && rowDate.getTime() !== yesterday.getTime()) return false;
+        if (timeframe === "Last 7 Days" && rowDate < sevenDaysAgo) return false;
+        if (timeframe === "Last 30 Days" && rowDate < thirtyDaysAgo) return false;
+      }
+
       if (search && !(r.sku || "").toLowerCase().includes(search.toLowerCase()) && !(r.order_id || "").toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [data, selectedYear, selectedMonth, selectedSku, search]);
+  }, [data, selectedYear, selectedMonth, selectedSku, search, timeframe]);
 
   // KPI summaries
   const kpis = useMemo(() => {
@@ -293,6 +318,17 @@ export default function DashboardPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end", flexWrap: "wrap" }}>
+          {/* Timeframe */}
+          <div>
+            <label style={{ display: "block", fontSize: "0.5625rem", color: "var(--text-muted)", marginBottom: "2px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Period</label>
+            <select className="input-field" value={timeframe} onChange={(e) => setTimeframe(e.target.value)} style={{ padding: "0.3rem 0.5rem", fontSize: "0.8125rem", minWidth: "120px" }}>
+              <option value="All Time">All Time</option>
+              <option value="Today">Today</option>
+              <option value="Yesterday">Yesterday</option>
+              <option value="Last 7 Days">Last 7 Days</option>
+              <option value="Last 30 Days">Last 30 Days</option>
+            </select>
+          </div>
           {/* Year */}
           <div>
             <label style={{ display: "block", fontSize: "0.5625rem", color: "var(--text-muted)", marginBottom: "2px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Year</label>

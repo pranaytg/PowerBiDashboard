@@ -160,12 +160,22 @@ class SPAPIService:
         marketplace = self.settings.sp_api_marketplace_id
         all_orders: list[dict] = []
 
+        from datetime import datetime, timedelta
+        
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        now = datetime.utcnow() - timedelta(minutes=5)
+        # If the requested end_date is today or in the future, cap it to (now - 5 mins)
+        if end_dt.date() >= now.date():
+            created_before = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            created_before = f"{end_date}T23:59:59Z"
+
         params = {
             "MarketplaceIds": marketplace,
             "CreatedAfter": f"{start_date}T00:00:00Z",
-            "CreatedBefore": f"{end_date}T23:59:59Z",
+            "CreatedBefore": created_before,
             "MaxResultsPerPage": str(ORDERS_MAX_RESULTS_PER_PAGE),
-            "OrderStatuses": "Shipped,Unshipped,PartiallyShipped",
+            "OrderStatuses": ["Shipped", "Unshipped", "PartiallyShipped"],
         }
 
         pages_fetched = 0
