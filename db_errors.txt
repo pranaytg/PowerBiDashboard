@@ -1,0 +1,5 @@
+Log ID: 22
+Error Part: Finances API: SP-API request failed: Client error '400 ' for url 'https://sellingpartnerapi-eu.amazon.com/finances/v0/financialEvents?PostedAfter=2026-02-01T00%3A00%3A00Z&PostedBefore=2026-03-09T23%3A59%3A59Z&MaxResultsPerPage=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+Error Part: Warehouse Inventory API: SP-API request failed: Client error '400 ' for url 'https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
