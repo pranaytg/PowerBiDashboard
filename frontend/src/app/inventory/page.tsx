@@ -30,6 +30,7 @@ interface InventoryRow {
     historical_daily: number[];
     historical_monthly: number[];
     stock_history: { date: string; qty: number }[];
+    warehouse_data: { fc: string; qty: number; condition: string; date: string }[];
 }
 
 interface InventoryData {
@@ -251,6 +252,31 @@ export default function InventoryPage() {
                                         </div>
                                     ))}
                                 </div>
+
+                                {/* Warehouse Breakdown */}
+                                {selected.warehouse_data && selected.warehouse_data.length > 0 && (
+                                    <div className="glass-card" style={{ padding: "1.25rem", display: "flex", flexDirection: "column" }}>
+                                        <h3 style={{ fontSize: "0.9375rem", fontWeight: 700, marginBottom: "0.75rem" }}>
+                                            Warehouse Availability (FC)
+                                        </h3>
+                                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "0.75rem" }}>
+                                            {selected.warehouse_data.map((wd, i) => (
+                                                <div key={i} style={{ padding: "0.75rem", background: "var(--bg-tertiary)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                                                    <div style={{ fontSize: "0.5625rem", fontWeight: 600, color: "var(--text-secondary)", textTransform: "uppercase", marginBottom: "0.25rem" }}>
+                                                        {wd.condition || "Sellable"}
+                                                    </div>
+                                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                        <span style={{ fontSize: "0.875rem", fontWeight: 600, fontFamily: "monospace" }}>{wd.fc}</span>
+                                                        <span style={{ fontSize: "1rem", fontWeight: 700, color: "var(--accent-indigo)" }}>{fmtNum(wd.qty)}</span>
+                                                    </div>
+                                                    <div style={{ fontSize: "0.5625rem", color: "var(--text-muted)", marginTop: "0.25rem", textAlign: "right" }}>
+                                                        {wd.date}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Forecast Chart with Confidence Band */}
                                 <div className="glass-card" style={{ height: "380px", padding: "1.25rem", display: "flex", flexDirection: "column" }}>

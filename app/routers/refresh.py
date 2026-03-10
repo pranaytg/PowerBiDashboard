@@ -35,71 +35,143 @@ def _run_refresh(
 ):
     """Background task to fetch SP-API data and store in Supabase.
     
-    Primary: Uses Orders API (works with 'Inventory and Order Tracking' role).
-    Fallback: GST MTR reports (only if report_types contains 'B2C'/'B2B' AND
-              the Restricted Tax role is available).
+    Performs a GLOBAL sync: Orders, Finances, Returns, Inventory, Warehouse Inventory.
     """
     total_fetched = 0
     total_inserted = 0
     errors = []
 
     try:
-        # Get product catalog for ASIN mapping
+        # 1. Orders / Sales
         product_catalog = service.get_product_catalog()
-        logger.info(
-            "Loaded product catalog with %d entries", len(product_catalog)
-        )
+        logger.info("Loaded product catalog with %d entries", len(product_catalog))
 
         all_records = []
-        use_orders_api = "ORDERS" in report_types or not any(
-            t in report_types for t in ("B2C", "B2B")
-        )
+        try:
+            logger.info("Syncing Orders API for %s to %s", start_date, end_date)
+            raw_data = sp_api.fetch_orders_with_items(start_date, end_date)
+            total_fetched += len(raw_data)
+            for row in raw_data:
+                record = transform_sp_api_orders_row(row, product_catalog)
+                record.pop("Fulfillment_Type", None)
+                all_records.append(record)
+            
+            if all_records:
+                inserted, updated = service.upsert_sales_batch(all_records)
+                total_inserted += inserted
+                logger.info("Inserted %d sales records limit", inserted)
+        except Exception as e:
+            logger.error("Orders API failed: %s", e)
+            errors.append(f"Orders API: {e}")
 
-        if use_orders_api:
-            # ---- Primary path: Orders API ----
-            logger.info("Using Orders API to fetch data for %s to %s", start_date, end_date)
-            try:
-                raw_data = sp_api.fetch_orders_with_items(start_date, end_date)
-                total_fetched = len(raw_data)
-                for row in raw_data:
-                    record = transform_sp_api_orders_row(row, product_catalog)
-                    all_records.append(record)
-                logger.info("Transformed %d records from Orders API", len(all_records))
-            except Exception as e:
-                logger.error("Orders API failed: %s", e)
-                errors.append(f"Orders API: {e}")
-        else:
-            # ---- Fallback path: GST MTR Reports ----
-            logger.info("Using GST MTR Reports (requires Restricted Tax role)")
-            raw_data = sp_api.fetch_all_data(start_date, end_date, report_types)
+        # 2. Finances
+        try:
+            logger.info("Syncing Financial Events for %s to %s", start_date, end_date)
+            fin_events = sp_api.fetch_financial_events(start_date, end_date)
+            batch = []
+            for ev in fin_events:
+                batch.append({
+                    "order_id": ev.get("order_id", ""),
+                    "posted_date": ev.get("posted_date", ""),
+                    "sku": ev.get("sku", ""),
+                    "asin": ev.get("asin", ""),
+                    "quantity": ev.get("quantity", 0),
+                    "event_type": ev.get("event_type", ""),
+                    "total_charges": ev.get("total_charges", 0),
+                    "total_fees": ev.get("total_fees", 0),
+                    "net_amount": ev.get("net_amount", 0),
+                    "charge_principal": ev.get("charge_Principal", 0),
+                    "charge_tax": ev.get("charge_Tax", 0),
+                    "fee_commission": ev.get("fee_Commission", 0),
+                    "fee_fba_fees": ev.get("fee_FBAPerUnitFulfillmentFee", 0),
+                    "fee_shipping_charge_back": ev.get("fee_ShippingChargeback", 0),
+                })
+            if batch:
+                inserted = service.upsert_finances_batch(batch)
+                logger.info("Inserted %d financial events", inserted)
+        except Exception as e:
+            logger.error("Finances API failed: %s", e)
+            errors.append(f"Finances API: {e}")
 
-            if "b2c" in raw_data:
-                for row in raw_data["b2c"]:
-                    record = transform_sp_api_mtr_row(row, "b2c", product_catalog)
-                    all_records.append(record)
-                total_fetched += len(raw_data["b2c"])
-            if "b2c_error" in raw_data:
-                errors.append(f"B2C: {raw_data['b2c_error']}")
+        # 3. Returns
+        try:
+            logger.info("Syncing Returns for %s to %s", start_date, end_date)
+            returns_data = sp_api.fetch_returns_report(start_date, end_date)
+            batch = []
+            for r in returns_data:
+                batch.append({
+                    "return_date": r.get("return-date", ""),
+                    "order_id": r.get("order-id", ""),
+                    "sku": r.get("sku", ""),
+                    "asin": r.get("asin", ""),
+                    "fnsku": r.get("fnsku", ""),
+                    "product_name": r.get("product-name", ""),
+                    "quantity": int(r.get("quantity", 0) or 0),
+                    "fulfillment_center_id": r.get("fulfillment-center-id", ""),
+                    "detailed_disposition": r.get("detailed-disposition", ""),
+                    "reason": r.get("reason", ""),
+                    "status": r.get("status", ""),
+                    "license_plate_number": r.get("license-plate-number", ""),
+                    "customer_comments": r.get("customer-comments", ""),
+                })
+            if batch:
+                inserted = service.upsert_returns_batch(batch)
+                logger.info("Inserted %d returns records", inserted)
+        except Exception as e:
+            logger.error("Returns API failed: %s", e)
+            errors.append(f"Returns API: {e}")
 
-            if "b2b" in raw_data:
-                for row in raw_data["b2b"]:
-                    record = transform_sp_api_mtr_row(row, "b2b", product_catalog)
-                    all_records.append(record)
-                total_fetched += len(raw_data["b2b"])
-            if "b2b_error" in raw_data:
-                errors.append(f"B2B: {raw_data['b2b_error']}")
+        # 4. Inventory Snapshots
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        try:
+            logger.info("Syncing FBA Inventory")
+            inventory_rows = sp_api.fetch_inventory_report()
+            batch = []
+            for row in inventory_rows:
+                batch.append({
+                    "snapshot_date": today,
+                    "sku": row["sku"],
+                    "fnsku": row.get("fnsku", ""),
+                    "asin": row.get("asin", ""),
+                    "product_name": row.get("product_name", ""),
+                    "fulfillable_quantity": row.get("fulfillable_quantity", 0),
+                    "inbound_quantity": row.get("inbound_quantity", 0),
+                    "reserved_quantity": row.get("reserved_quantity", 0),
+                    "unfulfillable_quantity": row.get("unfulfillable_quantity", 0),
+                    "total_quantity": row.get("total_quantity", 0),
+                })
+            if batch:
+                inserted = service.upsert_inventory_snapshots_batch(batch)
+                logger.info("Inserted %d inventory snapshots", inserted)
+        except Exception as e:
+            logger.error("Inventory API failed: %s", e)
+            errors.append(f"Inventory API: {e}")
 
-        # Insert into Supabase
-        if all_records:
-            # Strip extra fields that don't exist in the DB schema
-            for rec in all_records:
-                rec.pop("Fulfillment_Type", None)
-
-            inserted, updated = service.upsert_sales_batch(all_records)
-            total_inserted = inserted
-            logger.info(
-                "Inserted %d records from SP-API refresh", total_inserted
-            )
+        # 5. Warehouse Inventory
+        try:
+            logger.info("Syncing Warehouse Inventory")
+            wh_inventory_rows = sp_api.fetch_warehouse_inventory_report()
+            batch = []
+            for row in wh_inventory_rows:
+                qty = int(row.get("quantity", 0) or 0)
+                sku = row.get("sku", row.get("seller-sku", ""))
+                if not sku:
+                    continue
+                batch.append({
+                    "snapshot_date": today,
+                    "sku": sku,
+                    "fnsku": row.get("fnsku", ""),
+                    "asin": row.get("asin", ""),
+                    "fulfillment_center_id": row.get("fulfillment-center-id", ""),
+                    "quantity": qty,
+                    "condition": row.get("condition", ""),
+                })
+            if batch:
+                inserted = service.upsert_warehouse_inventory_batch(batch)
+                logger.info("Inserted %d warehouse inventory snapshots", inserted)
+        except Exception as e:
+            logger.error("Warehouse Inventory API failed: %s", e)
+            errors.append(f"Warehouse Inventory API: {e}")
 
         # Update refresh log
         status = "completed" if not errors else "completed_with_errors"
@@ -117,12 +189,10 @@ def _run_refresh(
         )
         logger.info(
             "Refresh completed: fetched=%d, inserted=%d, errors=%s",
-            total_fetched,
-            total_inserted,
-            error_msg,
+            total_fetched, total_inserted, error_msg,
         )
 
-        # Invalidate all caches so fresh data is served
+        # Invalidate all caches
         invalidate_all_caches()
 
     except Exception as e:

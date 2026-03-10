@@ -175,7 +175,7 @@ class SPAPIService:
             "CreatedAfter": f"{start_date}T00:00:00Z",
             "CreatedBefore": created_before,
             "MaxResultsPerPage": str(ORDERS_MAX_RESULTS_PER_PAGE),
-            "OrderStatuses": ["Shipped", "Unshipped", "PartiallyShipped"],
+            "OrderStatuses": ",".join(["Shipped", "Unshipped", "PartiallyShipped"]),
         }
 
         pages_fetched = 0
@@ -631,6 +631,37 @@ class SPAPIService:
         except Exception as e:
             logger.error("Inventory report fetch failed: %s", e)
             raise
+
+    def fetch_warehouse_inventory_report(self) -> list[dict]:
+        """Fetch current FBA inventory levels per warehouse (fulfillment center).
+        
+        Uses GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA report type.
+        """
+        if not self.is_configured:
+            raise SPAPIAuthError("SP-API credentials not configured.")
+
+        report_type = "GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA"
+        marketplace = self.settings.sp_api_marketplace_id
+
+        body = {
+            "reportType": report_type,
+            "marketplaceIds": [marketplace],
+        }
+
+        try:
+            result = self._make_request("POST", "/reports/2021-06-30/reports", json=body)
+            report_id = result.get("reportId")
+            logger.info("Created warehouse inventory report %s", report_id)
+
+            doc_id = self.wait_for_report(report_id)
+            raw_rows = self.download_report(doc_id)
+            
+            logger.info("Fetched warehouse inventory snapshot: %d rows", len(raw_rows))
+            return raw_rows
+        except Exception as e:
+            logger.error("Warehouse inventory report fetch failed: %s", e)
+            raise
+
 
     @staticmethod
     def _safe_int(value) -> int:

@@ -223,6 +223,20 @@ export async function GET(request: NextRequest) {
              ORDER BY snapshot_date ASC`
         );
 
+        // Fetch Warehouse Inventory (latest snapshot)
+        const { rows: warehouseData } = await query<{
+            sku: string;
+            fulfillment_center_id: string;
+            quantity: number;
+            condition: string;
+            snapshot_date: string;
+        }>(
+            `SELECT DISTINCT ON (sku, fulfillment_center_id) 
+                sku, fulfillment_center_id, quantity, condition, snapshot_date
+             FROM warehouse_inventory_snapshots
+             ORDER BY sku, fulfillment_center_id, snapshot_date DESC`
+        );
+
         // Build snapshot maps
         const latestStock: Record<string, SnapshotRow> = {};
         for (const s of snapshots) latestStock[s.sku] = s;
@@ -231,6 +245,12 @@ export async function GET(request: NextRequest) {
         for (const s of snapshotHistory) {
             if (!stockHistory[s.sku]) stockHistory[s.sku] = [];
             stockHistory[s.sku].push({ date: s.snapshot_date, qty: s.fulfillable_quantity });
+        }
+
+        const warehouseMap: Record<string, { fc: string; qty: number; condition: string; date: string }[]> = {};
+        for (const w of warehouseData) {
+            if (!warehouseMap[w.sku]) warehouseMap[w.sku] = [];
+            warehouseMap[w.sku].push({ fc: w.fulfillment_center_id, qty: w.quantity, condition: w.condition, date: w.snapshot_date });
         }
 
         // 4. Aggregate daily + monthly sales
@@ -398,6 +418,7 @@ export async function GET(request: NextRequest) {
                 historical_daily: dailyDemand,
                 historical_monthly: monthlyDemand.slice(-12),
                 stock_history: stockHistory[sku] || [],
+                warehouse_data: warehouseMap[sku] || [],
             });
         }
 

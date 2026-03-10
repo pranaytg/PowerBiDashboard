@@ -268,3 +268,57 @@ class SupabaseService:
             .execute()
         )
         return result.data
+
+    # ---- Finances, Returns, Inventory ----
+
+    def upsert_finances_batch(self, records: list[dict]) -> int:
+        total = 0
+        for i in range(0, len(records), BATCH_SIZE):
+            batch = records[i:i + BATCH_SIZE]
+            try:
+                res = self.client.table("financial_events").upsert(
+                    batch, on_conflict="order_id,sku,event_type"
+                ).execute()
+                total += len(res.data)
+            except Exception as e:
+                logger.error("Error upserting finances: %s", e)
+        return total
+
+    def upsert_returns_batch(self, records: list[dict]) -> int:
+        total = 0
+        for i in range(0, len(records), BATCH_SIZE):
+            batch = records[i:i + BATCH_SIZE]
+            try:
+                res = self.client.table("returns").upsert(
+                    batch, on_conflict="order_id,sku,return_date"
+                ).execute()
+                total += len(res.data)
+            except Exception as e:
+                logger.error("Error upserting returns: %s", e)
+        return total
+
+    def upsert_inventory_snapshots_batch(self, records: list[dict]) -> int:
+        total = 0
+        for i in range(0, len(records), BATCH_SIZE):
+            batch = records[i:i + BATCH_SIZE]
+            try:
+                res = self.client.table("inventory_snapshots").upsert(
+                    batch, on_conflict="snapshot_date,sku"
+                ).execute()
+                total += len(res.data)
+            except Exception as e:
+                logger.error("Error upserting inventory snapshots: %s", e)
+        return total
+
+    def upsert_warehouse_inventory_batch(self, records: list[dict]) -> int:
+        total = 0
+        for i in range(0, len(records), BATCH_SIZE):
+            batch = records[i:i + BATCH_SIZE]
+            try:
+                res = self.client.table("warehouse_inventory_snapshots").upsert(
+                    batch, on_conflict="snapshot_date,sku,fulfillment_center_id,condition"
+                ).execute()
+                total += len(res.data)
+            except Exception as e:
+                logger.error("Error upserting warehouse inventory: %s", e)
+        return total

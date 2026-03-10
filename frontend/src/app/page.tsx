@@ -318,16 +318,34 @@ export default function DashboardPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end", flexWrap: "wrap" }}>
-          {/* Timeframe */}
-          <div>
-            <label style={{ display: "block", fontSize: "0.5625rem", color: "var(--text-muted)", marginBottom: "2px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Period</label>
-            <select className="input-field" value={timeframe} onChange={(e) => setTimeframe(e.target.value)} style={{ padding: "0.3rem 0.5rem", fontSize: "0.8125rem", minWidth: "120px" }}>
-              <option value="All Time">All Time</option>
-              <option value="Today">Today</option>
-              <option value="Yesterday">Yesterday</option>
-              <option value="Last 7 Days">Last 7 Days</option>
-              <option value="Last 30 Days">Last 30 Days</option>
-            </select>
+          {/* Timeframe shortcuts & dropdown */}
+          <div style={{ display: "flex", gap: "0.25rem", alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: "0.25rem", marginBottom: "2px" }}>
+              <button
+                className={`btn-secondary ${timeframe === "Today" ? "active" : ""}`}
+                onClick={() => setTimeframe("Today")}
+                style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", background: timeframe === "Today" ? "var(--bg-tertiary)" : "transparent" }}
+              >
+                Today
+              </button>
+              <button
+                className={`btn-secondary ${timeframe === "Last 7 Days" ? "active" : ""}`}
+                onClick={() => setTimeframe("Last 7 Days")}
+                style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", background: timeframe === "Last 7 Days" ? "var(--bg-tertiary)" : "transparent" }}
+              >
+                7 Days
+              </button>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "0.5625rem", color: "var(--text-muted)", marginBottom: "2px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Period</label>
+              <select className="input-field" value={timeframe} onChange={(e) => setTimeframe(e.target.value)} style={{ padding: "0.3rem 0.5rem", fontSize: "0.8125rem", minWidth: "120px" }}>
+                <option value="All Time">All Time</option>
+                <option value="Today">Today</option>
+                <option value="Yesterday">Yesterday</option>
+                <option value="Last 7 Days">Last 7 Days</option>
+                <option value="Last 30 Days">Last 30 Days</option>
+              </select>
+            </div>
           </div>
           {/* Year */}
           <div>
