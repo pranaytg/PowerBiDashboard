@@ -2,8 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Any
 import logging
 from datetime import datetime
+import pandas as pd
 
-from app.database import get_db
+from app.database import get_supabase_client
 from app.services.sp_api_service import SPAPIService
 from app.services.forecasting_engine import calculate_forecast_and_alerts
 
@@ -17,7 +18,7 @@ async def get_multi_warehouse_forecast() -> list[dict[str, Any]]:
     Joins local inventory, historical sales, and computes reorder flags via Pandas.
     """
     try:
-        db = get_db()
+        db = get_supabase_client()
         
         # 1. Fetch Warehouses and Local Inventory
         inv_query = db.table("local_inventory").select(
@@ -68,7 +69,7 @@ async def sync_unshipped_orders_and_deduct() -> dict[str, Any]:
     """
     try:
         sp_api = SPAPIService()
-        db = get_db()
+        db = get_supabase_client()
         
         # Fetch unshipped orders
         # Typically we'd only query the last few days to catch new unshipped orders
