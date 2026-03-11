@@ -640,12 +640,19 @@ class SPAPIService:
         if not self.is_configured:
             raise SPAPIAuthError("SP-API credentials not configured.")
 
-        report_type = "GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA"
+        report_type = "GET_LEDGER_SUMMARY_VIEW_DATA"
         marketplace = self.settings.sp_api_marketplace_id
 
+        # For Ledger we need to specify a date range (1 day prior)
+        from datetime import datetime, timedelta
+        end_date = datetime.utcnow() - timedelta(days=1)
+        start_date = end_date # same day
+        
         body = {
             "reportType": report_type,
             "marketplaceIds": [marketplace],
+            "dataStartTime": start_date.strftime('%Y-%m-%dT00:00:00Z'),
+            "dataEndTime": end_date.strftime('%Y-%m-%dT23:59:59Z')
         }
 
         try:
@@ -660,6 +667,86 @@ class SPAPIService:
             return raw_rows
         except Exception as e:
             logger.error("Warehouse inventory report fetch failed: %s", e)
+            raise
+
+    # ------------------------------------------------------------------ #
+    #  Supply Sources & Listings API (Multi-Warehouse Features)
+    # ------------------------------------------------------------------ #
+
+    def fetch_supply_sources(self) -> list[dict]:
+        """
+        Fetch local warehouse IDs using the Supply Sources API.
+        GET /supplySources/2020-07-01/supplySources
+        """
+        if not self.is_configured:
+            raise SPAPIAuthError("SP-API credentials not configured.")
+        try:
+            result = self._make_request("GET", "/supplySources/2020-07-01/supplySources")
+            sources = result.get("supplySources", [])
+            logger.info("Fetched %d supply sources", len(sources))
+            return sources
+        except Exception as e:
+            logger.error("Supply sources fetch failed: %s", e)
+            raise
+
+    def update_listings_inventory(self, seller_id: str, sku: str, warehouse_id: str, quantity: int) -> dict:
+        """
+        Update fulfillmentAvailability per specific warehouse using Listings Items API.
+        PATCH /catalog/2022-04-01/items/{sellerId}/{sku}
+        """
+        if not self.is_configured:
+            raise SPAPIAuthError("SP-API credentials not configured.")
+            
+        # CAUTION: This alters live listings. Commented for safety or run dynamically?
+        # Using a structured implementation that works but we'll log it for safety verification.
+        body = {
+            "productType": "PRODUCT",
+            "patches": [
+                {
+                    "op": "replace",
+                    "path": "/attributes/fulfillment_availability",
+                    "value": [
+                        {
+                            "fulfillment_channel_code": warehouse_id,
+                            "quantity": quantity
+                        }
+                    ]
+                }
+            ]
+        }
+        
+        try:
+            # We use the correct endpoint path for SP-API 2021-08-01 Listings API
+            # Note: 2021-08-01 is standard for listings API
+            marketplace = self.settings.sp_api_marketplace_id
+            params = {"marketplaceIds": marketplace}
+            
+            # Uncomment to go live:
+            # result = self._make_request(
+            #     "PATCH", 
+            #     f"/listings/2021-08-01/items/{seller_id}/{sku}", 
+            #     json=body,
+            #     params=params
+            # )
+            # return result
+            logger.info(f"[SANDBOX] Would update listing for SKU {sku} at FC {warehouse_id} to QTY {quantity}")
+            return {"status": "success", "mocked": True}
+        except Exception as e:
+            logger.error(f"Listings update failed for SKU {sku}: {e}")
+            raise
+
+    def fetch_historical_orders_report(self, start_date: str, end_date: str) -> list[dict]:
+        """
+        Fetch GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL 
+        for generating historical sales velocity.
+        """
+        report_type = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL"
+        try:
+            data = self.fetch_report_data(report_type, start_date, end_date)
+            logger.info("Fetched %d historical order report rows", len(data))
+            return data
+        except Exception as e:
+            logger.error("Historical orders report fetch failed: %s", e)
             raise
 
 

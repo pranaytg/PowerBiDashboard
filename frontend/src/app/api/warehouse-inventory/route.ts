@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
             `WITH ActiveSkus AS (
                SELECT DISTINCT "Sku"
                FROM sales_data
-               WHERE "Date" >= CURRENT_DATE - INTERVAL '6 months'
+               WHERE "Date" >= TO_CHAR(NOW() - INTERVAL '6 months', 'YYYY-MM-DD')
                  AND "Transaction Type" != 'return'
              )
              SELECT sd."Sku", sd."Warehouse Id", SUM(COALESCE(CAST(sd."Quantity" AS integer), 0)) as total_sales
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
             `WITH ActiveSkus AS(
                 SELECT DISTINCT "Sku"
                FROM sales_data
-               WHERE "Date" >= CURRENT_DATE - INTERVAL '6 months'
+               WHERE "Date" >= TO_CHAR(NOW() - INTERVAL '6 months', 'YYYY-MM-DD')
                  AND "Transaction Type" != 'return'
             )
              SELECT DISTINCT ON(w.sku, w.fulfillment_center_id) 

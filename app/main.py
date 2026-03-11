@@ -15,7 +15,7 @@ from app.database import get_supabase_client
 from app.scheduler import start_scheduler, stop_scheduler
 from app.models import HealthResponse
 from app.cache import get_cache_stats, invalidate_all as invalidate_all_caches
-from app.routers import sales, refresh, sp_data
+from app.routers import sales, refresh, sp_data, inventory_forecast
 from app.services.supabase_service import SupabaseService
 
 # ---- Logging ----
@@ -125,6 +125,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(sales.router)
 app.include_router(refresh.router)
 app.include_router(sp_data.router)
+app.include_router(inventory_forecast.router)
 
 
 # ---- Root & Health ----

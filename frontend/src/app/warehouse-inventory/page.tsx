@@ -55,7 +55,7 @@ export default function WarehouseInventoryPage() {
                 <div>
                     <h1 style={{ fontSize: "2rem", fontWeight: 700, margin: "0 0 0.5rem 0", display: "flex", alignItems: "center", gap: "0.75rem" }}>
                         <span style={{ fontSize: "2rem", color: "var(--accent-indigo)" }}>🏢</span>
-                        Warehouse Inventory & Reponsplenishment
+                        Warehouse Inventory & Replenishment
                     </h1>
                     <p style={{ color: "var(--text-secondary)", margin: 0, fontSize: "0.95rem" }}>
                         March sales rate analysis and reorder recommendations per fulfillment center.
